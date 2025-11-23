@@ -121,10 +121,12 @@ async function parseImageWithGemini(file: File): Promise<ParseResult> {
 CRITICAL REQUIREMENTS:
 1. Extract moves in standard algebraic notation (e.g., e4, Nf3, Bxc6, O-O)
 2. Format as: 1. e4 e5 2. Nf3 Nc6 3. Bb5 a6
-3. For castling moves:
-   - Kingside castling: Use O-O (capital letter O, NOT zero 0)
-   - Queenside castling: Use O-O-O (capital letter O, NOT zero 0)
-   - NEVER use 0-0 or 0-0-0 (zeros are wrong!)
+3. For castling moves (VERY IMPORTANT):
+   - If you see "0-0" (with zeros), convert it to: O-O (capital letter O)
+   - If you see "0-0-0" (with zeros), convert it to: O-O-O (capital letter O)
+   - Kingside castling must be: O-O (capital letter O, NOT zero)
+   - Queenside castling must be: O-O-O (capital letter O, NOT zero)
+   - The image may show zeros (0-0) but you MUST output capital O (O-O)
 4. Include move numbers followed by a period and space
 5. Separate white and black moves with spaces
 6. Return ONLY the raw PGN moves without any formatting, code blocks, or explanations
@@ -132,7 +134,11 @@ CRITICAL REQUIREMENTS:
 8. Do NOT add any text before or after the moves
 9. If no chess notation found, return exactly: NO_NOTATION_FOUND
 10. Double check that every move is valid and makes sense in sequence
-11. If a move looks unclear or suspicious, skip it rather than guessing
+11. Look carefully at the board position after each move - if a move doesn't make sense, try to interpret what was intended
+12. Common issues to watch for:
+    - "l" (lowercase L) vs "1" (number one)
+    - "O" (letter) vs "0" (zero) in castling
+    - "S" or "K" for knight (should be "N")
 
 Example correct format: 1. e4 e5 2. Nf3 Nc6 3. Bb5 a6 4. Ba4 Nf6 5. O-O Be7
 
@@ -179,10 +185,9 @@ Extract the moves now:`
       .replace(/```\s*/g, '')
       .replace(/\*\*/g, '')
       .replace(/##\s*/g, '')
-      .replace(/[0０]/g, 'O')
-      .replace(/([OoO0０])\s*-\s*([OoO0０])\s*-\s*([OoO0О])/gi, 'O-O-O')
-      .replace(/([OoO0０])\s*-\s*([OoO0０])/gi, 'O-O')
       .trim()
+    
+    geminiResponse = normalizeCastling(geminiResponse)
 
     const cleanedText = extractChessMoves(geminiResponse)
     
@@ -244,10 +249,20 @@ function fileToBase64(file: File): Promise<string> {
   })
 }
 
+function normalizeCastling(text: string): string {
+  return text
+    .replace(/\b0\s*-\s*0\s*-\s*0\b/g, 'O-O-O')
+    .replace(/\b0\s*-\s*0\b/g, 'O-O')
+    .replace(/\b[oО]\s*-\s*[oО]\s*-\s*[oО]\b/gi, 'O-O-O')
+    .replace(/\b[oО]\s*-\s*[oО]\b/gi, 'O-O')
+}
+
 function extractChessMoves(text: string): string {
   const normalizedText = text
-    .replace(/[0oO]-[0oO]-[0oO]/gi, 'O-O-O')
-    .replace(/[0oO]-[0oO]/gi, 'O-O')
+    .replace(/0\s*-\s*0\s*-\s*0/gi, 'O-O-O')
+    .replace(/0\s*-\s*0/gi, 'O-O')
+    .replace(/[oО]\s*-\s*[oО]\s*-\s*[oО]/gi, 'O-O-O')
+    .replace(/[oО]\s*-\s*[oО]/gi, 'O-O')
     .replace(/\s+/g, ' ')
     .trim()
   
@@ -333,11 +348,11 @@ function isValidMove(move: string): boolean {
 function cleanMove(move: string): string {
   let cleaned = move.trim()
   
-  if (/^[0oO]-[0oO]-[0oO]$/i.test(cleaned)) {
+  if (/^[0oО]\s*-\s*[0oО]\s*-\s*[0oО]$/i.test(cleaned)) {
     return 'O-O-O'
   }
   
-  if (/^[0oO]-[0oO]$/i.test(cleaned)) {
+  if (/^[0oО]\s*-\s*[0oО]$/i.test(cleaned)) {
     return 'O-O'
   }
   
@@ -358,8 +373,10 @@ function validatePgnWithDetails(pgn: string): { valid: boolean; failedAt?: strin
   try {
     const testGame = new Chess()
     const cleanedPgn = pgn
-      .replace(/[0oO]-[0oO]-[0oO]/g, 'O-O-O')
-      .replace(/[0oO]-[0oO]/g, 'O-O')
+      .replace(/0\s*-\s*0\s*-\s*0/g, 'O-O-O')
+      .replace(/0\s*-\s*0/g, 'O-O')
+      .replace(/[oО]\s*-\s*[oО]\s*-\s*[oО]/g, 'O-O-O')
+      .replace(/[oО]\s*-\s*[oО]/g, 'O-O')
     
     testGame.loadPgn(cleanedPgn)
     const moveCount = Math.ceil(testGame.history().length / 2)
@@ -383,9 +400,13 @@ function validatePgnWithDetails(pgn: string): { valid: boolean; failedAt?: strin
       let cleanToken = token.replace(/\d+\./g, '').trim()
       if (!cleanToken) continue
       
-      if (/^[0oO]-[0oO]-[0oO]$/i.test(cleanToken)) {
+      if (/^0\s*-\s*0\s*-\s*0$/i.test(cleanToken)) {
         cleanToken = 'O-O-O'
-      } else if (/^[0oO]-[0oO]$/i.test(cleanToken)) {
+      } else if (/^0\s*-\s*0$/i.test(cleanToken)) {
+        cleanToken = 'O-O'
+      } else if (/^[oО]\s*-\s*[oО]\s*-\s*[oО]$/i.test(cleanToken)) {
+        cleanToken = 'O-O-O'
+      } else if (/^[oО]\s*-\s*[oО]$/i.test(cleanToken)) {
         cleanToken = 'O-O'
       }
       
