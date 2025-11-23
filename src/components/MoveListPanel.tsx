@@ -9,12 +9,36 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import type { MoveHistoryItem } from "@/types/chess"
+import { cn } from "@/lib/utils"
 
 interface MoveListPanelProps {
   moves: MoveHistoryItem[]
   currentMoveIndex: number
   onMoveClick: (moveIndex: number) => void
 }
+
+const MovePill = ({
+  move,
+  isActive,
+  isPlayed,
+}: {
+  move: MoveHistoryItem["white"]
+  isActive: boolean
+  isPlayed: boolean
+}) => (
+  <div
+    className={cn(
+      "rounded-full px-3 py-1 text-sm font-medium min-h-9 flex items-center justify-center text-center w-full",
+      isActive && "bg-accent text-accent-foreground shadow-sm",
+      !isActive && move?.isCustom &&
+        "bg-amber-50 dark:bg-amber-950/40 text-amber-900 dark:text-amber-100 border border-amber-200/80 dark:border-amber-500/40",
+      !isActive && !move?.isCustom && isPlayed && "bg-muted/60 dark:bg-muted/20",
+      !isPlayed && "bg-transparent text-muted-foreground"
+    )}
+  >
+    {move?.san ?? "-"}
+  </div>
+)
 
 export function MoveListPanel({
   moves,
@@ -52,6 +76,8 @@ export function MoveListPanel({
                 const blackIndex = whiteIndex + 1
                 const isWhiteActive = currentMoveIndex === whiteIndex
                 const isBlackActive = currentMoveIndex === blackIndex
+                const isWhitePlayed = currentMoveIndex >= whiteIndex
+                const isBlackPlayed = move.black && currentMoveIndex >= blackIndex
 
                 return (
                   <TableRow key={move.moveNumber}>
@@ -59,20 +85,28 @@ export function MoveListPanel({
                       {move.moveNumber}
                     </TableCell>
                     <TableCell
-                      className={`cursor-pointer hover:bg-muted transition-colors duration-150 ${
-                        isWhiteActive ? "bg-accent/10 font-semibold" : ""
-                      }`}
-                      onClick={() => onMoveClick(whiteIndex)}
+                      className="cursor-pointer py-2"
+                      onClick={() => move.white && onMoveClick(whiteIndex)}
                     >
-                      {move.white}
+                      <div className="flex justify-center">
+                        <MovePill
+                          move={move.white}
+                          isActive={isWhiteActive}
+                          isPlayed={isWhitePlayed}
+                        />
+                      </div>
                     </TableCell>
                     <TableCell
-                      className={`cursor-pointer hover:bg-muted transition-colors duration-150 ${
-                        isBlackActive ? "bg-accent/10 font-semibold" : ""
-                      }`}
+                      className="cursor-pointer py-2"
                       onClick={() => move.black && onMoveClick(blackIndex)}
                     >
-                      {move.black}
+                      <div className="flex justify-center">
+                        <MovePill
+                          move={move.black}
+                          isActive={isBlackActive}
+                          isPlayed={isBlackPlayed}
+                        />
+                      </div>
                     </TableCell>
                   </TableRow>
                 )

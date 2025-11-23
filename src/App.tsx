@@ -68,6 +68,8 @@ function App() {
               position={gameState.fen}
               onPieceDrop={handlePieceDrop}
               isAnalysisMode={isInAnalysisMode}
+              checkSquare={gameState.checkSquare}
+              lastMove={gameState.lastMove}
             />
             <NavigationControls
               onFirst={goToFirst}

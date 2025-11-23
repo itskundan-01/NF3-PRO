@@ -1,15 +1,14 @@
 import { Chess } from "chess.js"
-import type { MoveHistoryItem } from "@/types/chess"
+import type { MoveHistoryItem, PlayedMove } from "@/types/chess"
 
-export function getMoveHistory(chess: Chess): MoveHistoryItem[] {
-  const history = chess.history()
+export function getMoveHistory(playedMoves: PlayedMove[]): MoveHistoryItem[] {
   const moves: MoveHistoryItem[] = []
 
-  for (let i = 0; i < history.length; i += 2) {
+  for (let i = 0; i < playedMoves.length; i += 2) {
     moves.push({
       moveNumber: Math.floor(i / 2) + 1,
-      white: history[i] || null,
-      black: history[i + 1] || null,
+      white: playedMoves[i] ? { ...playedMoves[i] } : null,
+      black: playedMoves[i + 1] ? { ...playedMoves[i + 1] } : null,
     })
   }
 

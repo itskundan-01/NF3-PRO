@@ -7,6 +7,7 @@ import createIconImportProxy from "@github/spark/vitePhosphorIconProxyPlugin";
 import { resolve } from 'path'
 
 const projectRoot = process.env.PROJECT_ROOT || import.meta.dirname
+const devPort = 5173
 
 // https://vite.dev/config/
 export default defineConfig({
@@ -15,11 +16,29 @@ export default defineConfig({
     tailwindcss(),
     // DO NOT REMOVE
     createIconImportProxy() as PluginOption,
-    sparkPlugin() as PluginOption,
+    sparkPlugin({ port: devPort }) as PluginOption,
   ],
   resolve: {
     alias: {
       '@': resolve(projectRoot, 'src')
     }
+  },
+  server: {
+    host: '0.0.0.0',
+    port: devPort,
+    strictPort: true,
+    allowedHosts: [
+      'localhost',
+      '127.0.0.1',
+      '.localhost',
+      '.127.0.0.1',
+      '.github.dev',
+      '.app.github.dev',
+    ],
+  },
+  preview: {
+    host: '0.0.0.0',
+    port: devPort,
+    strictPort: true,
   },
 });

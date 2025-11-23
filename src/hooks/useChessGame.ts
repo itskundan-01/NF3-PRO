@@ -1,8 +1,23 @@
 import { useState, useCallback, useEffect, useRef } from "react"
 import { Chess } from "chess.js"
-import type { Square } from "chess.js"
+import type { Square, Move } from "chess.js"
 import { getMoveHistory, createNewGame } from "@/lib/chessUtils"
-import type { GameState } from "@/types/chess"
+import type { GameState, PlayedMove } from "@/types/chess"
+
+const FILES = ["a", "b", "c", "d", "e", "f", "g", "h"]
+
+function findKingSquare(chess: Chess, color: "w" | "b"): string | null {
+  const board = chess.board()
+  for (let rank = 0; rank < board.length; rank++) {
+    for (let file = 0; file < board[rank].length; file++) {
+      const piece = board[rank][file]
+      if (piece && piece.type === "k" && piece.color === color) {
+        return `${FILES[file]}${8 - rank}`
+      }
+    }
+  }
+  return null
+}
 
 export function useChessGame() {
   const [game, setGame] = useState<Chess>(() => createNewGame())
@@ -11,20 +26,42 @@ export function useChessGame() {
     pgn: "",
     moveHistory: [],
     currentMoveIndex: -1,
+    checkSquare: null,
+    lastMove: null,
   })
   const [mainLinePgn, setMainLinePgn] = useState<string>("")
   const [isInAnalysisMode, setIsInAnalysisMode] = useState(false)
-  const historyRef = useRef<string[]>([])
+  const historyRef = useRef<PlayedMove[]>([])
 
-  const updateGameState = useCallback((chess: Chess, moveIndex?: number) => {
-    const moveHistory = getMoveHistory(chess)
-    const allMoves = chess.history()
+  const updateGameState = useCallback((chess: Chess, moveIndex?: number, fullHistory?: PlayedMove[]) => {
+    // Get full move history from either the passed fullHistory or stored historyRef
+    const allMoves = fullHistory || historyRef.current
+    
+    // Create a new Chess instance with full game to get complete move history
+    const fullGame = new Chess()
+    for (const move of allMoves) {
+      try {
+        fullGame.move(move.san)
+      } catch {
+        break
+      }
+    }
+    
+    const moveHistory = getMoveHistory(allMoves)
+    const verboseHistory = chess.history({ verbose: true }) as Move[]
+    const recentMove = verboseHistory[verboseHistory.length - 1] ?? null
+    const lastMove = recentMove ? { from: recentMove.from, to: recentMove.to } : null
+    const colorToMove = chess.turn()
+    const isInCheck = chess.inCheck()
+    const checkSquare = isInCheck ? findKingSquare(chess, colorToMove) : null
     
     setGameState({
       fen: chess.fen(),
-      pgn: chess.pgn(),
+      pgn: fullGame.pgn(),
       moveHistory,
       currentMoveIndex: moveIndex ?? allMoves.length - 1,
+      checkSquare,
+      lastMove,
     })
   }, [])
 
@@ -39,6 +76,13 @@ export function useChessGame() {
         })
 
         if (move) {
+          const currentIndex = gameState.currentMoveIndex
+          const preservedMoves = historyRef.current.slice(0, currentIndex + 1)
+          const newRecordedMove: PlayedMove = {
+            san: move.san,
+            isCustom: Boolean(mainLinePgn),
+          }
+          historyRef.current = [...preservedMoves, newRecordedMove]
           setGame(gameCopy)
           updateGameState(gameCopy)
           
@@ -53,7 +97,7 @@ export function useChessGame() {
         return false
       }
     },
-    [game, updateGameState, mainLinePgn, isInAnalysisMode]
+    [game, updateGameState, mainLinePgn, isInAnalysisMode, gameState.currentMoveIndex]
   )
 
   const resetGame = useCallback(() => {
@@ -89,17 +133,21 @@ export function useChessGame() {
         newGame.loadPgn(cleanPgn)
         
         const allMoves = newGame.history()
+        const recordedMoves: PlayedMove[] = allMoves.map((san) => ({
+          san,
+          isCustom: false,
+        }))
         
-        if (allMoves.length === 0) {
+        if (recordedMoves.length === 0) {
           console.error("No moves loaded from PGN")
           return false
         }
         
-        console.log(`Successfully loaded ${allMoves.length} moves`)
+        console.log(`Successfully loaded ${recordedMoves.length} moves`)
         
-        historyRef.current = allMoves
+        historyRef.current = recordedMoves
         setGame(newGame)
-        updateGameState(newGame)
+        updateGameState(newGame, recordedMoves.length - 1, recordedMoves)
         setMainLinePgn(cleanPgn)
         setIsInAnalysisMode(false)
         return true
@@ -119,7 +167,7 @@ export function useChessGame() {
 
         for (let i = 0; i <= moveIndex; i++) {
           if (moves[i]) {
-            newGame.move(moves[i])
+            newGame.move(moves[i].san)
           }
         }
 

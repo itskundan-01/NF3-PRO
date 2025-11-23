@@ -10,6 +10,103 @@ export interface ParseResult {
   isPartial?: boolean
 }
 
+function formatHistoryAsPgn(history: string[]): string {
+  if (!history.length) {
+    return ""
+  }
+
+  const segments: string[] = []
+  for (let i = 0; i < history.length; i += 2) {
+    const moveNumber = Math.floor(i / 2) + 1
+    const whiteMove = history[i]
+    const blackMove = history[i + 1]
+
+    if (!whiteMove && !blackMove) continue
+
+    let fragment = `${moveNumber}. ${whiteMove ?? ""}`.trimEnd()
+    if (blackMove) {
+      fragment += ` ${blackMove}`
+    }
+    segments.push(fragment)
+  }
+
+  return segments.join(" ").trim()
+}
+
+function cleanPgnInput(input: string): string {
+  if (!input) return ""
+
+  return input
+    .replace(/```pgn\s*/gi, "")
+    .replace(/```/g, "")
+    .replace(/\*\*/g, "")
+    .replace(/\u00A0/g, " ")
+    .replace(/\r/g, "\n")
+    .trim()
+}
+
+export async function parsePgnTextInput(rawInput: string): Promise<ParseResult> {
+  const cleanedInput = cleanPgnInput(rawInput)
+
+  if (!cleanedInput) {
+    return {
+      success: false,
+      error: "Please paste a valid PGN string.",
+    }
+  }
+
+  const normalizedInput = normalizeCastling(cleanedInput)
+  const candidates = [normalizedInput]
+  const stripped = stripPgnMetadata(normalizedInput)
+  if (stripped && stripped !== normalizedInput) {
+    candidates.push(stripped)
+  }
+
+  for (const candidate of candidates) {
+    try {
+      const chess = new Chess()
+      chess.loadPgn(candidate)
+      const history = chess.history()
+
+      if (history.length > 0) {
+        return {
+          success: true,
+          pgn: formatHistoryAsPgn(history),
+          movesFound: Math.ceil(history.length / 2),
+        }
+      }
+    } catch {
+      // fall through to validation flow
+    }
+  }
+
+  const validationResult = validatePgnWithDetails(stripped || normalizedInput)
+
+  if (validationResult.valid) {
+    return {
+      success: true,
+      pgn: stripped || normalizedInput,
+      movesFound: validationResult.moveCount,
+    }
+  }
+
+  if (validationResult.partialPgn && validationResult.moveCount > 0) {
+    return {
+      success: true,
+      pgn: validationResult.partialPgn,
+      movesFound: validationResult.moveCount,
+      isPartial: true,
+    }
+  }
+
+  return {
+    success: false,
+    error: validationResult.failedAt
+      ? `Unable to parse PGN. Problem detected near ${validationResult.failedAt}.`
+      : "Unable to parse PGN. Please verify the notation and try again.",
+  }
+}
+
 export async function parseCSV(file: File): Promise<ParseResult> {
   return new Promise((resolve) => {
     Papa.parse(file, {
@@ -116,33 +213,86 @@ async function parseImageWithGemini(file: File): Promise<ParseResult> {
     const API_KEY = "AIzaSyAa-8Cwh6_XixZemMocbQ3wRAI_KG_6KYE"
     const API_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${API_KEY}`
     
-    const promptText = `You are a chess notation expert. Analyze this image which contains chess game notation and extract all the moves in standard PGN format.
+    const promptText = `You are an expert chess analyst and handwriting recognition specialist. Your task is to carefully extract chess moves from this handwritten scoresheet image.
 
-CRITICAL REQUIREMENTS:
-1. Extract moves in standard algebraic notation (e.g., e4, Nf3, Bxc6, O-O)
-2. Format as: 1. e4 e5 2. Nf3 Nc6 3. Bb5 a6
-3. For castling moves (VERY IMPORTANT):
-   - If you see "0-0" (with zeros), convert it to: O-O (capital letter O)
-   - If you see "0-0-0" (with zeros), convert it to: O-O-O (capital letter O)
-   - Kingside castling must be: O-O (capital letter O, NOT zero)
-   - Queenside castling must be: O-O-O (capital letter O, NOT zero)
-   - The image may show zeros (0-0) but you MUST output capital O (O-O)
-4. Include move numbers followed by a period and space
-5. Separate white and black moves with spaces
-6. Return ONLY the raw PGN moves without any formatting, code blocks, or explanations
-7. Do NOT wrap in markdown code blocks
-8. Do NOT add any text before or after the moves
-9. If no chess notation found, return exactly: NO_NOTATION_FOUND
-10. Double check that every move is valid and makes sense in sequence
-11. Look carefully at the board position after each move - if a move doesn't make sense, try to interpret what was intended
-12. Common issues to watch for:
-    - "l" (lowercase L) vs "1" (number one)
-    - "O" (letter) vs "0" (zero) in castling
-    - "S" or "K" for knight (should be "N")
+📋 SCORESHEET STRUCTURE:
+- Two columns: WHITE moves (LEFT) and BLACK moves (RIGHT)
+- Each row = one complete move pair (White's move + Black's move)
+- Move numbers are in the leftmost column
+- Read row by row: move number → White's move → Black's move
 
-Example correct format: 1. e4 e5 2. Nf3 Nc6 3. Bb5 a6 4. Ba4 Nf6 5. O-O Be7
+🔍 STEP-BY-STEP EXTRACTION PROCESS:
 
-Extract the moves now:`
+STEP 1 - READ EACH MOVE CAREFULLY:
+For each row, identify:
+- Move number (1, 2, 3, etc.)
+- White's move in LEFT column
+- Black's move in RIGHT column
+
+STEP 2 - INTERPRET HANDWRITING:
+Common OCR/handwriting confusions - BE VERY CAREFUL:
+- Letter "g" vs "a" or "q" (e.g., Ng5 vs Na5)
+- Letter "O" vs number "0" (castling must use letter O: O-O)
+- "N" vs "K" (N=knight, K=king)
+- "b" vs "h" or "6"
+- "c" vs "e"
+- "d" vs "cl" or "a"
+- "1" vs "l" (lowercase L)
+- "5" vs "S"
+- Faint "x" for captures
+- Unclear "+" or "#" for check/checkmate
+
+STEP 3 - VALIDATE EACH MOVE:
+As you extract moves, mentally play them on the board:
+- Does this move make sense given the current position?
+- Is the piece able to reach that square?
+- Does the notation match what's possible in this position?
+- If a move seems illegal, re-examine the handwriting - what else could it be?
+
+STEP 4 - COMMON PATTERNS TO RECOGNIZE:
+- Opening moves: e4, d4, Nf3, Nc3, Bc4, Bb5, etc.
+- Pawn captures: exd5, cxd4, etc.
+- Piece moves with captures: Nxd5, Bxc6+, Qxd5
+- Castling: O-O (kingside) or O-O-O (queenside) - written as 0-0 or 0-0-0
+- Checks: move followed by "+"
+- Checkmate: move followed by "#"
+
+STEP 5 - SELF-VALIDATION:
+After extracting all moves, review the complete game:
+1. Start from position: rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR
+2. Play through each move mentally
+3. If any move is impossible, re-check that move's handwriting
+4. Look for common misreadings (a↔g, b↔h, c↔e, N↔K, O↔0)
+5. Ensure moves alternate White-Black correctly
+6. Verify move numbers are sequential
+
+⚠️ CRITICAL RULES:
+1. Castling MUST be: O-O or O-O-O (capital letter O, NOT zero)
+2. Knight moves use "N" (not K or Kn)
+3. Pawn moves have no piece letter (just "e4", not "Pe4")
+4. Captures use "x": Nxd5, exd5
+5. Each move must be LEGAL in the sequence
+
+📤 OUTPUT FORMAT:
+Return ONLY the PGN moves in this format:
+1. e4 e5 2. Nf3 Nc6 3. Bb5 a6 4. Ba4 Nf6 5. O-O Be7
+
+Rules for output:
+- NO markdown formatting or code blocks
+- NO explanations or commentary
+- NO line breaks between moves
+- Just move numbers, dots, and moves separated by spaces
+- If no chess notation found, return: NO_NOTATION_FOUND
+
+🎯 QUALITY CHECK:
+Before returning your answer:
+✓ Did you check each ambiguous letter carefully?
+✓ Did you mentally validate that all moves are legal?
+✓ Did you convert all castling to O-O format (letter O)?
+✓ Are move numbers sequential?
+✓ Did you include ALL moves from the scoresheet?
+
+Now carefully extract the moves from this scoresheet image:`
 
     const requestBody = {
       contents: [{
@@ -189,10 +339,17 @@ Extract the moves now:`
     
     geminiResponse = normalizeCastling(geminiResponse)
 
-    const cleanedText = extractChessMoves(geminiResponse)
+    // If Gemini returned properly formatted PGN (starts with "1."), use it directly
+    let cleanedText = geminiResponse
+    if (!/^1\.\s+/.test(cleanedText)) {
+      // Otherwise, try to extract moves from unformatted text
+      cleanedText = extractChessMoves(geminiResponse)
+    }
     
-    console.log("Gemini response:", geminiResponse)
-    console.log("Cleaned PGN:", cleanedText)
+    console.log("=== CHESS NOTATION EXTRACTION DEBUG ===")
+    console.log("Gemini raw response:", geminiResponse)
+    console.log("After extractChessMoves:", cleanedText)
+    console.log("======================================")
     
     if (!cleanedText || cleanedText.length < 5) {
       return {
@@ -249,15 +406,45 @@ function fileToBase64(file: File): Promise<string> {
   })
 }
 
+function stripPgnMetadata(text: string): string {
+  if (!text) return ""
+
+  let sanitized = text
+
+  // Remove PGN header tags
+  sanitized = sanitized.replace(/\[[^\]]*\]/g, " ")
+  // Remove braces comments
+  sanitized = sanitized.replace(/\{[^}]*\}/g, " ")
+  // Remove semicolon comments
+  sanitized = sanitized.replace(/;[^\n]*/g, " ")
+  // Remove recursive parentheses variations
+  let previous = sanitized
+  do {
+    previous = sanitized
+    sanitized = sanitized.replace(/\([^()]*\)/g, " ")
+  } while (sanitized !== previous)
+
+  return sanitized.replace(/\s+/g, " ").trim()
+}
+
 function normalizeCastling(text: string): string {
   let normalized = text
+    // Handle zeros (0) -> letter O
     .replace(/0\s*-\s*0\s*-\s*0/g, 'O-O-O')
     .replace(/0\s*-\s*0/g, 'O-O')
+    // Handle lowercase o or Cyrillic О -> letter O
     .replace(/[oО]\s*-\s*[oО]\s*-\s*[oО]/gi, 'O-O-O')
     .replace(/[oО]\s*-\s*[oО]/gi, 'O-O')
+    // Handle spaced O-O variations
+    .replace(/\bO\s*-\s*O\s*-\s*O\b/g, 'O-O-O')
+    .replace(/\bO\s*-\s*O\b/g, 'O-O')
   
-  normalized = normalized.replace(/\bO\s*-\s*O\s*-\s*O\b/g, 'O-O-O')
-  normalized = normalized.replace(/\bO\s*-\s*O\b/g, 'O-O')
+  // Handle common OCR mistakes in castling
+  normalized = normalized
+    .replace(/\b00\b/g, 'O-O')           // Handles 00 without hyphens
+    .replace(/\b000\b/g, 'O-O-O')        // Handles 000 without hyphens
+    .replace(/\b0-0\b/g, 'O-O')          // Handles 0-0
+    .replace(/\b0-0-0\b/g, 'O-O-O')      // Handles 0-0-0
   
   return normalized
 }
@@ -369,31 +556,118 @@ function validatePgn(pgn: string): boolean {
   }
 }
 
-function validatePgnWithDetails(pgn: string): { valid: boolean; failedAt?: string; partialPgn?: string; moveCount: number } {
-  const normalizeCastlingInText = (text: string): string => {
-    return text
-      .replace(/0\s*-\s*0\s*-\s*0/g, 'O-O-O')
-      .replace(/0\s*-\s*0/g, 'O-O')
-      .replace(/[oО]\s*-\s*[oО]\s*-\s*[oО]/gi, 'O-O-O')
-      .replace(/[oО]\s*-\s*[oО]/gi, 'O-O')
-      .replace(/\bO\s+-\s+O\s+-\s+O\b/g, 'O-O-O')
-      .replace(/\bO\s+-\s+O\b/g, 'O-O')
+function tryOcrCorrections(move: string, chess: Chess): string | null {
+  // First, try disambiguation for ambiguous piece moves (Rd1 → Rcd1, Rfd1, etc.)
+  if (/^[RNBQK][a-h]?[1-8]$/.test(move)) {
+    const piece = move[0]
+    const destination = move.slice(-2)
+    const legalMoves = chess.moves()
+    
+    // Try adding file disambiguation (Ra1 → Raa1, Rba1, Rca1, etc.)
+    for (const file of ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h']) {
+      const disambiguated = `${piece}${file}${destination}`
+      if (legalMoves.includes(disambiguated)) {
+        return disambiguated
+      }
+    }
+    
+    // Try adding rank disambiguation (Ra1 → R1a1, R2a1, etc.)
+    for (const rank of ['1', '2', '3', '4', '5', '6', '7', '8']) {
+      const disambiguated = `${piece}${rank}${destination}`
+      if (legalMoves.includes(disambiguated)) {
+        return disambiguated
+      }
+    }
   }
   
+  // Try disambiguation for captures (Rxd1 → Rcxd1, Rfxd1, etc.)
+  if (/^[RNBQK]x[a-h][1-8]$/.test(move)) {
+    const piece = move[0]
+    const destination = move.slice(-2)
+    const legalMoves = chess.moves()
+    
+    for (const file of ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h']) {
+      const disambiguated = `${piece}${file}x${destination}`
+      if (legalMoves.includes(disambiguated)) {
+        return disambiguated
+      }
+    }
+    
+    for (const rank of ['1', '2', '3', '4', '5', '6', '7', '8']) {
+      const disambiguated = `${piece}${rank}x${destination}`
+      if (legalMoves.includes(disambiguated)) {
+        return disambiguated
+      }
+    }
+  }
+  
+  // Common OCR mistakes in handwritten chess notation
+  const corrections = [
+    // Number confusions in square names
+    { pattern: /([a-h])6/g, replacement: '$15' },  // d6 → d5
+    { pattern: /([a-h])5/g, replacement: '$16' },  // d5 → d6
+    { pattern: /([a-h])3/g, replacement: '$14' },  // d3 → d4
+    { pattern: /([a-h])4/g, replacement: '$13' },  // d4 → d3
+    { pattern: /([a-h])2/g, replacement: '$13' },  // d2 → d3
+    { pattern: /([a-h])7/g, replacement: '$18' },  // d7 → d8
+    { pattern: /([a-h])8/g, replacement: '$17' },  // d8 → d7
+    
+    // Letter confusions: a↔g, e↔c, b↔h, l↔1
+    { pattern: /Na(\d)/, replacement: 'Ng$1' },  // Na5 → Ng5
+    { pattern: /Ng(\d)/, replacement: 'Na$1' },  // Ng5 → Na5
+    { pattern: /Ba(\d)/, replacement: 'Bg$1' },  // Ba5 → Bg5
+    { pattern: /Bg(\d)/, replacement: 'Ba$1' },  // Bg5 → Ba5
+    { pattern: /Ra(\d)/, replacement: 'Rg$1' },  // Ra5 → Rg5
+    { pattern: /Rg(\d)/, replacement: 'Ra$1' },  // Rg5 → Ra5
+    { pattern: /Qa(\d)/, replacement: 'Qg$1' },  // Qa5 → Qg5
+    { pattern: /Qg(\d)/, replacement: 'Qa$1' },  // Qg5 → Qa5
+    { pattern: /a([1-8])/, replacement: 'g$1' }, // a5 → g5 (pawn moves)
+    { pattern: /g([1-8])/, replacement: 'a$1' }, // g5 → a5 (pawn moves)
+    { pattern: /b([1-8])/, replacement: 'h$1' }, // b5 → h5
+    { pattern: /h([1-8])/, replacement: 'b$1' }, // h5 → b5
+    { pattern: /c([1-8])/, replacement: 'e$1' }, // c5 → e5
+    { pattern: /e([1-8])/, replacement: 'c$1' }, // e5 → c5
+    { pattern: /d([1-8])/, replacement: 'a$1' }, // d5 → a5
+    { pattern: /l/, replacement: '1' },          // l → 1
+    { pattern: /1/, replacement: 'l' },          // 1 → l (rare)
+  ]
+
+  for (const { pattern, replacement } of corrections) {
+    const corrected = move.replace(pattern, replacement)
+    if (corrected !== move) {
+      try {
+        // Create a temporary chess instance to test the move
+        const testChess = new Chess(chess.fen())
+        const testMove = testChess.move(corrected)
+        if (testMove) {
+          return corrected
+        }
+      } catch {
+        // Try next correction
+      }
+    }
+  }
+
+  return null
+}
+
+function validatePgnWithDetails(pgn: string): { valid: boolean; failedAt?: string; partialPgn?: string; moveCount: number } {
+  const normalized = normalizeCastling(pgn)
+  const cleanedPgn = stripPgnMetadata(normalized)
+
   try {
     const testGame = new Chess()
-    const cleanedPgn = normalizeCastlingInText(pgn)
-    
     testGame.loadPgn(cleanedPgn)
     const moveCount = Math.ceil(testGame.history().length / 2)
+    if (moveCount === 0) {
+      throw new Error("No moves parsed")
+    }
     return { valid: true, moveCount }
   } catch (error) {
     const testGame = new Chess()
     let partialMoves: string[] = []
     let failedAtMove = ""
     let currentMoveNumber = 1
-    
-    const cleanedPgn = normalizeCastlingInText(pgn)
     const moves = cleanedPgn.split(/\s+/)
     
     for (let i = 0; i < moves.length; i++) {
@@ -408,10 +682,11 @@ function validatePgnWithDetails(pgn: string): { valid: boolean; failedAt?: strin
       let cleanToken = token.replace(/\d+\./g, '').trim()
       if (!cleanToken) continue
       
-      cleanToken = normalizeCastlingInText(cleanToken)
+      // Apply castling normalization to each individual token
+      cleanToken = normalizeCastling(cleanToken)
       
       try {
-        const attemptedMove = testGame.move(cleanToken)
+        let attemptedMove = testGame.move(cleanToken)
         
         if (!attemptedMove) {
           throw new Error(`Illegal move`)
@@ -419,10 +694,26 @@ function validatePgnWithDetails(pgn: string): { valid: boolean; failedAt?: strin
         
         partialMoves.push(cleanToken)
       } catch (moveError) {
+        // Try common OCR misreadings before giving up
+        const correctedMove = tryOcrCorrections(cleanToken, testGame)
+        
+        if (correctedMove) {
+          console.log(`Auto-corrected "${cleanToken}" to "${correctedMove}"`)
+          partialMoves.push(correctedMove)
+          testGame.move(correctedMove)
+          continue
+        }
+        
         failedAtMove = `${token} (move ${currentMoveNumber})`
-        console.error(`Failed to validate move "${token}" (cleaned: "${cleanToken}") at move ${currentMoveNumber}`)
-        console.error("Legal moves were:", testGame.moves())
-        console.error("Error:", moveError)
+        console.error(`=== MOVE VALIDATION FAILED ===`)
+        console.error(`Original token: "${token}"`)
+        console.error(`Cleaned token: "${cleanToken}"`)
+        console.error(`Move number: ${currentMoveNumber}`)
+        console.error(`Current position FEN: ${testGame.fen()}`)
+        console.error(`Legal moves available:`, testGame.moves())
+        console.error(`Error:`, moveError)
+        console.error(`Successful moves so far:`, partialMoves)
+        console.error(`==============================`)
         break
       }
     }
