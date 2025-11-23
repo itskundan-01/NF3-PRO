@@ -82,9 +82,60 @@ export async function parseImage(file: File): Promise<ParseResult> {
     const cleanedText = extractChessMoves(text)
 
     if (!cleanedText) {
+      console.log("Tesseract OCR failed, falling back to Gemini vision API...")
+      return await parseImageWithGemini(file)
+    }
+
+    const moveCount = (cleanedText.match(/\d+\./g) || []).length
+
+    return {
+      success: true,
+      pgn: cleanedText,
+      movesFound: moveCount,
+    }
+  } catch (error) {
+    console.log("Tesseract OCR error, falling back to Gemini vision API...")
+    return await parseImageWithGemini(file)
+  }
+}
+
+async function parseImageWithGemini(file: File): Promise<ParseResult> {
+  try {
+    const base64Image = await fileToBase64(file)
+    
+    const promptText = `You are a chess notation expert. Analyze this image which contains chess game notation and extract all the moves in standard PGN (Portable Game Notation) format.
+
+Instructions:
+1. Look for chess moves in standard algebraic notation (e.g., e4, Nf3, Bxc6, O-O, etc.)
+2. Extract moves in sequence with their move numbers
+3. Format the output as clean PGN notation: "1. e4 e5 2. Nf3 Nc6 3. Bb5 a6..."
+4. If you see castling, use O-O for kingside and O-O-O for queenside
+5. Include check (+) and checkmate (#) symbols if present
+6. Only return the moves, no additional text or explanation
+7. If the image contains multiple games, extract the most complete one
+8. If no valid chess notation is found, return "NO_NOTATION_FOUND"
+
+Image data: ${base64Image}
+
+Return ONLY the PGN notation or "NO_NOTATION_FOUND".`
+
+    const response = await window.spark.llm(promptText, "gpt-4o")
+    
+    const trimmedResponse = response.trim()
+    
+    if (trimmedResponse === "NO_NOTATION_FOUND" || trimmedResponse.length < 5) {
       return {
         success: false,
         error: "Could not detect chess notation in image. Please ensure the image is clear and contains standard algebraic notation.",
+      }
+    }
+
+    const cleanedText = extractChessMoves(trimmedResponse)
+    
+    if (!cleanedText || cleanedText.length < 5) {
+      return {
+        success: false,
+        error: "Could not detect valid chess notation in image. Please ensure the image is clear and contains standard algebraic notation.",
       }
     }
 
@@ -98,9 +149,21 @@ export async function parseImage(file: File): Promise<ParseResult> {
   } catch (error) {
     return {
       success: false,
-      error: `OCR processing failed: ${error}`,
+      error: `AI vision processing failed: ${error}`,
     }
   }
+}
+
+function fileToBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => {
+      const result = reader.result as string
+      resolve(result)
+    }
+    reader.onerror = reject
+    reader.readAsDataURL(file)
+  })
 }
 
 function extractChessMoves(text: string): string {

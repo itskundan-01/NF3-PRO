@@ -10,7 +10,7 @@ import {
 import { Button } from "@/components/ui/button"
 import { Progress } from "@/components/ui/progress"
 import { Alert, AlertDescription } from "@/components/ui/alert"
-import { UploadSimple, Warning, CheckCircle } from "@phosphor-icons/react"
+import { UploadSimple, Warning, CheckCircle, Info } from "@phosphor-icons/react"
 import { parseCSV, parseImage, type ParseResult } from "@/lib/parseChessNotation"
 
 interface UploadDialogProps {
@@ -25,6 +25,7 @@ export function UploadDialog({
   onGameLoaded,
 }: UploadDialogProps) {
   const [isProcessing, setIsProcessing] = useState(false)
+  const [processingStatus, setProcessingStatus] = useState<string>("")
   const [result, setResult] = useState<ParseResult | null>(null)
   const [selectedFile, setSelectedFile] = useState<File | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -34,6 +35,7 @@ export function UploadDialog({
     if (file) {
       setSelectedFile(file)
       setResult(null)
+      setProcessingStatus("")
     }
   }
 
@@ -42,6 +44,7 @@ export function UploadDialog({
 
     setIsProcessing(true)
     setResult(null)
+    setProcessingStatus("Processing file...")
 
     try {
       let parseResult: ParseResult
@@ -50,6 +53,7 @@ export function UploadDialog({
       const fileName = selectedFile.name.toLowerCase()
 
       if (fileType === "text/csv" || fileName.endsWith(".csv")) {
+        setProcessingStatus("Parsing CSV file...")
         parseResult = await parseCSV(selectedFile)
       } else if (
         fileType.startsWith("image/") ||
@@ -57,6 +61,7 @@ export function UploadDialog({
         fileName.endsWith(".jpg") ||
         fileName.endsWith(".jpeg")
       ) {
+        setProcessingStatus("Extracting text from image with OCR...")
         parseResult = await parseImage(selectedFile)
       } else {
         parseResult = {
@@ -77,6 +82,7 @@ export function UploadDialog({
       })
     } finally {
       setIsProcessing(false)
+      setProcessingStatus("")
     }
   }
 
@@ -84,6 +90,7 @@ export function UploadDialog({
     setSelectedFile(null)
     setResult(null)
     setIsProcessing(false)
+    setProcessingStatus("")
     onOpenChange(false)
   }
 
@@ -125,8 +132,16 @@ export function UploadDialog({
 
           {isProcessing && (
             <div className="space-y-2">
-              <p className="text-sm text-muted-foreground">Processing file...</p>
+              <p className="text-sm text-muted-foreground">{processingStatus}</p>
               <Progress value={undefined} className="w-full" />
+              {processingStatus.includes("AI") && (
+                <Alert className="transition-all duration-200">
+                  <Info size={18} weight="regular" />
+                  <AlertDescription className="text-xs">
+                    Using AI vision model for enhanced accuracy...
+                  </AlertDescription>
+                </Alert>
+              )}
             </div>
           )}
 

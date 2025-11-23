@@ -19,12 +19,12 @@ A professional chess analysis platform designed for serious players, coaches, an
 - **Progression**: View empty board → Drag piece → Drop on valid square → Piece moves and move recorded → Continue play
 - **Success Criteria**: User can complete a full legal chess game with instant feedback on illegal moves, seeing move history update in real-time
 
-### 2. Multi-Format Game Upload & Parsing
-- **Functionality**: Accepts CSV, PNG, JPG files containing chess notation and extracts PGN data using CSV parsing or OCR
-- **Purpose**: Allows users to digitize games from various sources (screenshots, spreadsheets, scoresheet photos) for analysis
+### 2. Multi-Format Game Upload & Parsing (Dual-Approach OCR)
+- **Functionality**: Accepts CSV, PNG, JPG files containing chess notation and extracts PGN data using CSV parsing or intelligent dual-approach OCR (Tesseract + AI vision fallback)
+- **Purpose**: Allows users to digitize games from various sources (screenshots, spreadsheets, scoresheet photos) with enterprise-grade reliability through automatic fallback to AI vision when standard OCR fails
 - **Trigger**: User clicks "Upload" button in navbar
-- **Progression**: Click upload → Select file → File processes (with loading indicator) → Notation extracted → Game loaded on board → Success message
-- **Success Criteria**: CSV with "White/Black" columns loads correctly; clear image of chess notation extracts at least 80% of moves accurately; appropriate error messages for unclear images
+- **Progression**: Click upload → Select file → File processes (with loading indicator showing status) → Standard OCR attempts extraction → If fails, automatically switches to AI vision model → Notation extracted → Game loaded on board → Success message with move count
+- **Success Criteria**: CSV with "White/Black" columns loads correctly; clear image of chess notation extracts at least 80% of moves accurately with standard OCR; difficult/unclear images automatically fallback to AI vision API for enhanced extraction; appropriate status messages inform user of processing method; error messages only appear when both methods fail
 
 ### 3. Game Replay Navigation
 - **Functionality**: Step-by-step navigation through uploaded games with synchronized board updates and move highlighting
@@ -51,6 +51,8 @@ A professional chess analysis platform designed for serious players, coaches, an
 
 - **Invalid File Upload**: Display clear error message specifying what went wrong (format not supported, file corrupted, no chess notation detected)
 - **Partial OCR Extraction**: Show warning with number of moves successfully parsed, allow user to proceed with partial game
+- **OCR Fallback to AI**: When standard OCR fails to detect notation, automatically and transparently switch to AI vision API with informative status message
+- **Both OCR Methods Fail**: Only show error when both Tesseract and AI vision fail to extract valid notation
 - **Illegal Move Attempt**: Piece snaps back to original position with subtle red border flash on board
 - **Empty Upload**: Prevent processing and show "File appears empty" message
 - **Large Game Files**: Show loading progress indicator for files taking >1 second to process
