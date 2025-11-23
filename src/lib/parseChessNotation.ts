@@ -1,5 +1,6 @@
 import Papa from "papaparse"
 import { createWorker, PSM } from "tesseract.js"
+import { Chess } from "chess.js"
 
 export interface ParseResult {
   success: boolean
@@ -81,8 +82,8 @@ export async function parseImage(file: File): Promise<ParseResult> {
 
     const cleanedText = extractChessMoves(text)
 
-    if (!cleanedText) {
-      console.log("Tesseract OCR failed, falling back to Gemini vision API...")
+    if (!cleanedText || !validatePgn(cleanedText)) {
+      console.log("Tesseract OCR failed to extract valid PGN, falling back to Gemini vision API...")
       return await parseImageWithGemini(file)
     }
 
@@ -108,19 +109,22 @@ async function parseImageWithGemini(file: File): Promise<ParseResult> {
     const API_KEY = "AIzaSyAa-8Cwh6_XixZemMocbQ3wRAI_KG_6KYE"
     const API_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${API_KEY}`
     
-    const promptText = `You are a chess notation expert. Analyze this image which contains chess game notation and extract all the moves in standard PGN (Portable Game Notation) format.
+    const promptText = `You are a chess notation expert. Analyze this image which contains chess game notation and extract all the moves in standard PGN format.
 
-Instructions:
-1. Look for chess moves in standard algebraic notation (e.g., e4, Nf3, Bxc6, O-O, etc.)
-2. Extract moves in sequence with their move numbers
-3. Format the output as clean PGN notation: "1. e4 e5 2. Nf3 Nc6 3. Bb5 a6..."
-4. If you see castling, use O-O for kingside and O-O-O for queenside
-5. Include check (+) and checkmate (#) symbols if present
-6. Only return the moves, no additional text or explanation
-7. If the image contains multiple games, extract the most complete one
-8. If no valid chess notation is found, return "NO_NOTATION_FOUND"
+CRITICAL REQUIREMENTS:
+1. Extract moves in standard algebraic notation (e.g., e4, Nf3, Bxc6, O-O)
+2. Format as: 1. e4 e5 2. Nf3 Nc6 3. Bb5 a6
+3. Use O-O for kingside castling and O-O-O for queenside (capital letter O, not zero)
+4. Include move numbers followed by a period and space
+5. Separate white and black moves with spaces
+6. Return ONLY the raw PGN moves without any formatting, code blocks, or explanations
+7. Do NOT wrap in markdown code blocks
+8. Do NOT add any text before or after the moves
+9. If no chess notation found, return exactly: NO_NOTATION_FOUND
 
-Return ONLY the PGN notation or "NO_NOTATION_FOUND".`
+Example correct format: 1. e4 e5 2. Nf3 Nc6 3. Bb5 a6 4. Ba4 Nf6
+
+Extract the moves now:`
 
     const requestBody = {
       contents: [{
@@ -149,21 +153,39 @@ Return ONLY the PGN notation or "NO_NOTATION_FOUND".`
     }
 
     const data = await response.json()
-    const trimmedResponse = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || ""
+    let geminiResponse = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || ""
     
-    if (trimmedResponse === "NO_NOTATION_FOUND" || trimmedResponse.length < 5) {
+    if (geminiResponse === "NO_NOTATION_FOUND" || geminiResponse.length < 5) {
       return {
         success: false,
         error: "Could not detect chess notation in image. Please ensure the image is clear and contains standard algebraic notation.",
       }
     }
 
-    const cleanedText = extractChessMoves(trimmedResponse)
+    geminiResponse = geminiResponse
+      .replace(/```pgn\s*/gi, '')
+      .replace(/```\s*/g, '')
+      .replace(/\*\*/g, '')
+      .replace(/##\s*/g, '')
+      .trim()
+
+    const cleanedText = extractChessMoves(geminiResponse)
+    
+    console.log("Gemini response:", geminiResponse)
+    console.log("Cleaned PGN:", cleanedText)
     
     if (!cleanedText || cleanedText.length < 5) {
       return {
         success: false,
         error: "Could not detect valid chess notation in image. Please ensure the image is clear and contains standard algebraic notation.",
+      }
+    }
+
+    if (!validatePgn(cleanedText)) {
+      console.error("Extracted PGN failed validation")
+      return {
+        success: false,
+        error: "Extracted notation is not valid chess moves. Please check the image quality and try again.",
       }
     }
 
@@ -175,6 +197,7 @@ Return ONLY the PGN notation or "NO_NOTATION_FOUND".`
       movesFound: moveCount,
     }
   } catch (error) {
+    console.error("Gemini API error:", error)
     return {
       success: false,
       error: `AI vision processing failed: ${error}`,
@@ -195,47 +218,53 @@ function fileToBase64(file: File): Promise<string> {
 }
 
 function extractChessMoves(text: string): string {
-  const lines = text.split("\n").map(line => line.trim()).filter(line => line.length > 0)
-  const moves: Array<{ white?: string; black?: string }> = []
-  
   const normalizedText = text
-    .replace(/[oO0]/g, 'O')
-    .replace(/[l1I|]/g, '1')
-    .replace(/[S5]/g, 's')
+    .replace(/[oO0](-[oO0]){1,2}/g, (match) => {
+      return match.length > 4 ? 'O-O-O' : 'O-O'
+    })
     .replace(/\s+/g, ' ')
+    .trim()
   
-  const singleMovePattern = /([NBRQK]?[a-h]?[1-8]?x?[a-h][1-8](?:=[NBRQ])?[+#]?|O-O-O|O-O|0-0-0|0-0)/gi
+  const sequentialPattern = /(\d+)\.\s*([^\s\d]+)(?:\s+([^\s\d]+))?/g
+  const moves: Array<{ white?: string; black?: string }> = []
+  let match
   
-  const linePattern = /(\d+)\s*\.?\s*([^\s]+)(?:\s+([^\s]+))?/
-  
-  for (const line of lines) {
-    const normalizedLine = line
-      .replace(/[oO0]/g, 'O')
-      .replace(/[l1I|]/g, '1')
-      .trim()
+  while ((match = sequentialPattern.exec(normalizedText)) !== null) {
+    const moveNum = parseInt(match[1])
+    const whiteMove = match[2]
+    const blackMove = match[3]
     
-    const lineMatch = normalizedLine.match(linePattern)
-    if (lineMatch) {
-      const moveNum = parseInt(lineMatch[1])
-      const whiteMove = lineMatch[2]
-      const blackMove = lineMatch[3]
-      
-      if (isValidMove(whiteMove)) {
-        const entry = moves[moveNum - 1] || {}
-        entry.white = cleanMove(whiteMove)
-        moves[moveNum - 1] = entry
-      }
+    if (isValidMove(whiteMove)) {
+      const entry = moves[moveNum - 1] || {}
+      entry.white = cleanMove(whiteMove)
+      moves[moveNum - 1] = entry
       
       if (blackMove && isValidMove(blackMove)) {
-        const entry = moves[moveNum - 1] || {}
         entry.black = cleanMove(blackMove)
-        moves[moveNum - 1] = entry
       }
     }
   }
   
+  if (moves.length > 0) {
+    let pgnText = ""
+    moves.forEach((move, index) => {
+      if (move.white || move.black) {
+        pgnText += `${index + 1}. `
+        if (move.white) {
+          pgnText += `${move.white} `
+        }
+        if (move.black) {
+          pgnText += `${move.black} `
+        }
+      }
+    })
+    return pgnText.trim()
+  }
+  
+  const singleMovePattern = /[NBRQK]?[a-h]?[1-8]?x?[a-h][1-8](?:=[NBRQ])?[+#]?|O-O-O|O-O/g
   const allMoves = normalizedText.match(singleMovePattern)
-  if (allMoves && allMoves.length > moves.filter(m => m.white || m.black).length * 1.5) {
+  
+  if (allMoves && allMoves.length >= 2) {
     let pgnText = ""
     let moveNumber = 1
     
@@ -252,37 +281,18 @@ function extractChessMoves(text: string): string {
       }
     }
     
-    if (pgnText.trim().length > 0) {
-      return pgnText.trim()
-    }
+    return pgnText.trim()
   }
   
-  if (moves.length === 0) {
-    return ""
-  }
-  
-  let pgnText = ""
-  moves.forEach((move, index) => {
-    if (move.white || move.black) {
-      pgnText += `${index + 1}. `
-      if (move.white) {
-        pgnText += `${move.white} `
-      }
-      if (move.black) {
-        pgnText += `${move.black} `
-      }
-    }
-  })
-  
-  return pgnText.trim()
+  return ""
 }
 
 function isValidMove(move: string): boolean {
-  if (!move) return false
+  if (!move || move.length < 2) return false
   
   const cleanedMove = move.replace(/[+#?!]/g, '').trim()
   
-  if (/^(O-O-O|O-O|0-0-0|0-0)$/.test(cleanedMove)) {
+  if (/^(O-O-O|O-O)$/i.test(cleanedMove)) {
     return true
   }
   
@@ -290,13 +300,23 @@ function isValidMove(move: string): boolean {
     return false
   }
   
-  const validPattern = /^[NBRQK]?[a-h]?[1-8]?x?[a-h][1-8](?:=[NBRQ])?$/
+  const validPattern = /^[NBRQK]?[a-h]?[1-8]?x?[a-h][1-8](?:=[NBRQ])?$/i
   return validPattern.test(cleanedMove)
 }
 
 function cleanMove(move: string): string {
   return move
-    .replace(/[oO0]/g, 'O')
-    .replace(/[l|]/g, '1')
+    .replace(/^0-0-0$/i, 'O-O-O')
+    .replace(/^0-0$/i, 'O-O')
     .trim()
+}
+
+function validatePgn(pgn: string): boolean {
+  try {
+    const testGame = new Chess()
+    testGame.loadPgn(pgn)
+    return testGame.history().length > 0
+  } catch {
+    return false
+  }
 }
