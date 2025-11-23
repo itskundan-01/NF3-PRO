@@ -106,7 +106,7 @@ async function parseImageWithGemini(file: File): Promise<ParseResult> {
     const mimeType = file.type || 'image/jpeg'
     
     const API_KEY = "AIzaSyAa-8Cwh6_XixZemMocbQ3wRAI_KG_6KYE"
-    const API_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${API_KEY}`
+    const API_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${API_KEY}`
     
     const promptText = `You are a chess notation expert. Analyze this image which contains chess game notation and extract all the moves in standard PGN (Portable Game Notation) format.
 
