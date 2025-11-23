@@ -408,8 +408,8 @@ function validatePgnWithDetails(pgn: string): { valid: boolean; failedAt?: strin
     let cleanedPgn = pgn
       .replace(/0\s*-\s*0\s*-\s*0/g, 'O-O-O')
       .replace(/0\s*-\s*0/g, 'O-O')
-      .replace(/[oО]\s*-\s*[oО]\s*-\s*[oО]/g, 'O-O-O')
-      .replace(/[oО]\s*-\s*[oО]/g, 'O-O')
+      .replace(/[oО]\s*-\s*[oО]\s*-\s*[oО]/gi, 'O-O-O')
+      .replace(/[oО]\s*-\s*[oО]/gi, 'O-O')
       .replace(/\bO\s+-\s+O\s+-\s+O\b/g, 'O-O-O')
       .replace(/\bO\s+-\s+O\b/g, 'O-O')
     
@@ -417,11 +417,20 @@ function validatePgnWithDetails(pgn: string): { valid: boolean; failedAt?: strin
     const moveCount = Math.ceil(testGame.history().length / 2)
     return { valid: true, moveCount }
   } catch (error) {
-    const moves = pgn.split(/\s+/)
     const testGame = new Chess()
     let partialMoves: string[] = []
     let failedAtMove = ""
     let currentMoveNumber = 1
+    
+    let cleanedPgn = pgn
+      .replace(/0\s*-\s*0\s*-\s*0/g, 'O-O-O')
+      .replace(/0\s*-\s*0/g, 'O-O')
+      .replace(/[oО]\s*-\s*[oО]\s*-\s*[oО]/gi, 'O-O-O')
+      .replace(/[oО]\s*-\s*[oО]/gi, 'O-O')
+      .replace(/\bO\s+-\s+O\s+-\s+O\b/g, 'O-O-O')
+      .replace(/\bO\s+-\s+O\b/g, 'O-O')
+    
+    const moves = cleanedPgn.split(/\s+/)
     
     for (let i = 0; i < moves.length; i++) {
       const token = moves[i].trim()
@@ -435,22 +444,7 @@ function validatePgnWithDetails(pgn: string): { valid: boolean; failedAt?: strin
       let cleanToken = token.replace(/\d+\./g, '').trim()
       if (!cleanToken) continue
       
-      if (/^0\s*-\s*0\s*-\s*0$/i.test(cleanToken)) {
-        cleanToken = 'O-O-O'
-      } else if (/^0\s*-\s*0$/i.test(cleanToken)) {
-        cleanToken = 'O-O'
-      } else if (/^[oО]\s*-\s*[oО]\s*-\s*[oО]$/i.test(cleanToken)) {
-        cleanToken = 'O-O-O'
-      } else if (/^[oО]\s*-\s*[oО]$/i.test(cleanToken)) {
-        cleanToken = 'O-O'
-      } else if (/O\s+-\s+O\s+-\s+O/.test(cleanToken)) {
-        cleanToken = 'O-O-O'
-      } else if (/O\s+-\s+O/.test(cleanToken)) {
-        cleanToken = 'O-O'
-      }
-      
       try {
-        const legalMoves = testGame.moves({ verbose: true })
         const attemptedMove = testGame.move(cleanToken)
         
         if (!attemptedMove) {
