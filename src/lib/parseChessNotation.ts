@@ -7,6 +7,7 @@ export interface ParseResult {
   pgn?: string
   error?: string
   movesFound?: number
+  isPartial?: boolean
 }
 
 export async function parseCSV(file: File): Promise<ParseResult> {
@@ -82,7 +83,13 @@ export async function parseImage(file: File): Promise<ParseResult> {
 
     const cleanedText = extractChessMoves(text)
 
-    if (!cleanedText || !validatePgn(cleanedText)) {
+    if (!cleanedText) {
+      console.log("Tesseract OCR failed to extract valid PGN, falling back to Gemini vision API...")
+      return await parseImageWithGemini(file)
+    }
+
+    const validationResult = validatePgnWithDetails(cleanedText)
+    if (!validationResult.valid) {
       console.log("Tesseract OCR failed to extract valid PGN, falling back to Gemini vision API...")
       return await parseImageWithGemini(file)
     }
@@ -181,11 +188,23 @@ Extract the moves now:`
       }
     }
 
-    if (!validatePgn(cleanedText)) {
-      console.error("Extracted PGN failed validation")
+    const validationResult = validatePgnWithDetails(cleanedText)
+    if (!validationResult.valid) {
+      console.error("Extracted PGN failed validation at move:", validationResult.failedAt)
+      console.error("Full PGN:", cleanedText)
+      
+      if (validationResult.partialPgn && validationResult.moveCount > 0) {
+        return {
+          success: true,
+          pgn: validationResult.partialPgn,
+          movesFound: validationResult.moveCount,
+          isPartial: true,
+        }
+      }
+      
       return {
         success: false,
-        error: "Extracted notation is not valid chess moves. Please check the image quality and try again.",
+        error: `Extracted notation is not valid chess moves. Failed at move ${validationResult.failedAt}. Please check the image quality and try again.`,
       }
     }
 
@@ -318,5 +337,60 @@ function validatePgn(pgn: string): boolean {
     return testGame.history().length > 0
   } catch {
     return false
+  }
+}
+
+function validatePgnWithDetails(pgn: string): { valid: boolean; failedAt?: string; partialPgn?: string; moveCount: number } {
+  try {
+    const testGame = new Chess()
+    testGame.loadPgn(pgn)
+    const moveCount = Math.ceil(testGame.history().length / 2)
+    return { valid: true, moveCount }
+  } catch (error) {
+    const moves = pgn.split(/\s+/)
+    const testGame = new Chess()
+    let partialMoves: string[] = []
+    let failedAtMove = ""
+    
+    for (let i = 0; i < moves.length; i++) {
+      const token = moves[i].trim()
+      if (!token) continue
+      
+      if (/^\d+\.$/.test(token)) {
+        continue
+      }
+      
+      const cleanToken = token.replace(/\d+\./g, '').trim()
+      if (!cleanToken) continue
+      
+      try {
+        testGame.move(cleanToken)
+        partialMoves.push(cleanToken)
+      } catch {
+        failedAtMove = token
+        break
+      }
+    }
+    
+    if (partialMoves.length > 0) {
+      let reconstructedPgn = ""
+      for (let i = 0; i < partialMoves.length; i += 2) {
+        const moveNum = Math.floor(i / 2) + 1
+        reconstructedPgn += `${moveNum}. ${partialMoves[i]}`
+        if (partialMoves[i + 1]) {
+          reconstructedPgn += ` ${partialMoves[i + 1]}`
+        }
+        reconstructedPgn += " "
+      }
+      
+      return {
+        valid: false,
+        failedAt: failedAtMove || "end of game",
+        partialPgn: reconstructedPgn.trim(),
+        moveCount: Math.ceil(partialMoves.length / 2),
+      }
+    }
+    
+    return { valid: false, failedAt: failedAtMove || "start", moveCount: 0 }
   }
 }

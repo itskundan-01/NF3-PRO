@@ -157,7 +157,9 @@ export function UploadDialog({
               )}
               <AlertDescription>
                 {result.success
-                  ? `Successfully loaded ${result.movesFound} move(s). Click "Done" to start analyzing.`
+                  ? result.isPartial
+                    ? `Loaded ${result.movesFound} move(s) - some moves could not be validated. Click "Done" to analyze.`
+                    : `Successfully loaded ${result.movesFound} move(s). Click "Done" to start analyzing.`
                   : result.error}
               </AlertDescription>
             </Alert>
