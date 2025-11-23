@@ -187,6 +187,12 @@ Extract the moves now:`
       .replace(/##\s*/g, '')
       .trim()
     
+    geminiResponse = geminiResponse
+      .replace(/(\d+\.)\s*0\s*-\s*0\s*-\s*0/g, '$1 O-O-O')
+      .replace(/(\d+\.)\s*0\s*-\s*0/g, '$1 O-O')
+      .replace(/\s+0\s*-\s*0\s*-\s*0\s+/g, ' O-O-O ')
+      .replace(/\s+0\s*-\s*0\s+/g, ' O-O ')
+    
     geminiResponse = normalizeCastling(geminiResponse)
 
     const cleanedText = extractChessMoves(geminiResponse)
@@ -250,19 +256,26 @@ function fileToBase64(file: File): Promise<string> {
 }
 
 function normalizeCastling(text: string): string {
-  return text
-    .replace(/\b0\s*-\s*0\s*-\s*0\b/g, 'O-O-O')
-    .replace(/\b0\s*-\s*0\b/g, 'O-O')
-    .replace(/\b[oО]\s*-\s*[oО]\s*-\s*[oО]\b/gi, 'O-O-O')
-    .replace(/\b[oО]\s*-\s*[oО]\b/gi, 'O-O')
+  let normalized = text
+    .replace(/0\s*-\s*0\s*-\s*0/g, 'O-O-O')
+    .replace(/0\s*-\s*0/g, 'O-O')
+    .replace(/[oО]\s*-\s*[oО]\s*-\s*[oО]/gi, 'O-O-O')
+    .replace(/[oО]\s*-\s*[oО]/gi, 'O-O')
+  
+  normalized = normalized.replace(/\bO\s+-\s+O\s+-\s+O\b/g, 'O-O-O')
+  normalized = normalized.replace(/\bO\s+-\s+O\b/g, 'O-O')
+  
+  return normalized
 }
 
 function extractChessMoves(text: string): string {
-  const normalizedText = text
+  let normalizedText = text
     .replace(/0\s*-\s*0\s*-\s*0/gi, 'O-O-O')
     .replace(/0\s*-\s*0/gi, 'O-O')
     .replace(/[oО]\s*-\s*[oО]\s*-\s*[oО]/gi, 'O-O-O')
     .replace(/[oО]\s*-\s*[oО]/gi, 'O-O')
+    .replace(/\bO\s+-\s+O\s+-\s+O\b/g, 'O-O-O')
+    .replace(/\bO\s+-\s+O\b/g, 'O-O')
     .replace(/\s+/g, ' ')
     .trim()
   
@@ -337,6 +350,10 @@ function isValidMove(move: string): boolean {
     return true
   }
   
+  if (/^(0-0-0|0-0)$/.test(cleanedMove)) {
+    return true
+  }
+  
   if (!/[a-h][1-8]/.test(cleanedMove)) {
     return false
   }
@@ -348,11 +365,27 @@ function isValidMove(move: string): boolean {
 function cleanMove(move: string): string {
   let cleaned = move.trim()
   
-  if (/^[0oО]\s*-\s*[0oО]\s*-\s*[0oО]$/i.test(cleaned)) {
+  if (/^0\s*-\s*0\s*-\s*0$/i.test(cleaned)) {
     return 'O-O-O'
   }
   
-  if (/^[0oО]\s*-\s*[0oО]$/i.test(cleaned)) {
+  if (/^0\s*-\s*0$/i.test(cleaned)) {
+    return 'O-O'
+  }
+  
+  if (/^[oО]\s*-\s*[oО]\s*-\s*[oО]$/i.test(cleaned)) {
+    return 'O-O-O'
+  }
+  
+  if (/^[oО]\s*-\s*[oО]$/i.test(cleaned)) {
+    return 'O-O'
+  }
+  
+  if (/O\s+-\s+O\s+-\s+O/.test(cleaned)) {
+    return 'O-O-O'
+  }
+  
+  if (/O\s+-\s+O/.test(cleaned)) {
     return 'O-O'
   }
   
@@ -372,11 +405,13 @@ function validatePgn(pgn: string): boolean {
 function validatePgnWithDetails(pgn: string): { valid: boolean; failedAt?: string; partialPgn?: string; moveCount: number } {
   try {
     const testGame = new Chess()
-    const cleanedPgn = pgn
+    let cleanedPgn = pgn
       .replace(/0\s*-\s*0\s*-\s*0/g, 'O-O-O')
       .replace(/0\s*-\s*0/g, 'O-O')
       .replace(/[oО]\s*-\s*[oО]\s*-\s*[oО]/g, 'O-O-O')
       .replace(/[oО]\s*-\s*[oО]/g, 'O-O')
+      .replace(/\bO\s+-\s+O\s+-\s+O\b/g, 'O-O-O')
+      .replace(/\bO\s+-\s+O\b/g, 'O-O')
     
     testGame.loadPgn(cleanedPgn)
     const moveCount = Math.ceil(testGame.history().length / 2)
@@ -407,6 +442,10 @@ function validatePgnWithDetails(pgn: string): { valid: boolean; failedAt?: strin
       } else if (/^[oО]\s*-\s*[oО]\s*-\s*[oО]$/i.test(cleanToken)) {
         cleanToken = 'O-O-O'
       } else if (/^[oО]\s*-\s*[oО]$/i.test(cleanToken)) {
+        cleanToken = 'O-O'
+      } else if (/O\s+-\s+O\s+-\s+O/.test(cleanToken)) {
+        cleanToken = 'O-O-O'
+      } else if (/O\s+-\s+O/.test(cleanToken)) {
         cleanToken = 'O-O'
       }
       
