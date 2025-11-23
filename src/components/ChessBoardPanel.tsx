@@ -53,6 +53,25 @@ export function ChessBoardPanel({
     }
   }, [position])
 
+  const showLegalTargets = useCallback((square: Square) => {
+    const legalMoves = getLegalMoves(square)
+
+    if (legalMoves.length === 0) {
+      clearHighlights()
+      return false
+    }
+
+    setSelectedSquare(square)
+    setLegalTargets(
+      legalMoves.map((move) => ({
+        square: move.to as Square,
+        isCapture: Boolean(move.captured),
+      }))
+    )
+
+    return true
+  }, [getLegalMoves, clearHighlights])
+
   const handleSquareClick = useCallback(({ square }: SquareHandlerArgs) => {
     const normalizedSquare = square as Square
 
@@ -71,21 +90,12 @@ export function ChessBoardPanel({
       return
     }
 
-    const legalMoves = getLegalMoves(normalizedSquare)
+    showLegalTargets(normalizedSquare)
+  }, [selectedSquare, legalTargets, onPieceDrop, clearHighlights, showLegalTargets])
 
-    if (legalMoves.length === 0) {
-      clearHighlights()
-      return
-    }
-
-    setSelectedSquare(normalizedSquare)
-    setLegalTargets(
-      legalMoves.map((move) => ({
-        square: move.to as Square,
-        isCapture: Boolean(move.captured),
-      }))
-    )
-  }, [getLegalMoves, selectedSquare, clearHighlights, onPieceDrop])
+  const handleSquareMouseDown = useCallback(({ square }: SquareHandlerArgs) => {
+    showLegalTargets(square as Square)
+  }, [showLegalTargets])
 
   useEffect(() => {
     clearHighlights()
@@ -163,7 +173,8 @@ export function ChessBoardPanel({
     squareStyles,
     onPieceDrop: handleDrop,
     onSquareClick: handleSquareClick,
-  }), [position, handleDrop, squareStyles, handleSquareClick])
+    onSquareMouseDown: handleSquareMouseDown,
+  }), [position, handleDrop, squareStyles, handleSquareClick, handleSquareMouseDown])
 
   return (
     <Card className={`p-6 ${borderClass} transition-all duration-200`}>
