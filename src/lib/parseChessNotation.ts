@@ -102,6 +102,11 @@ export async function parseImage(file: File): Promise<ParseResult> {
 async function parseImageWithGemini(file: File): Promise<ParseResult> {
   try {
     const base64Image = await fileToBase64(file)
+    const base64Data = base64Image.split(',')[1]
+    const mimeType = file.type || 'image/jpeg'
+    
+    const API_KEY = "AIzaSyAa-8Cwh6_XixZemMocbQ3wRAI_KG_6KYE"
+    const API_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${API_KEY}`
     
     const promptText = `You are a chess notation expert. Analyze this image which contains chess game notation and extract all the moves in standard PGN (Portable Game Notation) format.
 
@@ -115,13 +120,36 @@ Instructions:
 7. If the image contains multiple games, extract the most complete one
 8. If no valid chess notation is found, return "NO_NOTATION_FOUND"
 
-Image data: ${base64Image}
-
 Return ONLY the PGN notation or "NO_NOTATION_FOUND".`
 
-    const response = await window.spark.llm(promptText, "gpt-4o")
-    
-    const trimmedResponse = response.trim()
+    const requestBody = {
+      contents: [{
+        parts: [
+          { text: promptText },
+          {
+            inline_data: {
+              mime_type: mimeType,
+              data: base64Data
+            }
+          }
+        ]
+      }]
+    }
+
+    const response = await fetch(API_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(requestBody)
+    })
+
+    if (!response.ok) {
+      throw new Error(`Gemini API error: ${response.status} - ${await response.text()}`)
+    }
+
+    const data = await response.json()
+    const trimmedResponse = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || ""
     
     if (trimmedResponse === "NO_NOTATION_FOUND" || trimmedResponse.length < 5) {
       return {
