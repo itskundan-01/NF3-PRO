@@ -4,7 +4,6 @@ import { Card } from "@/components/ui/card"
 import { Chessboard } from "react-chessboard"
 import { Chess } from "chess.js"
 import type { Square, Move } from "chess.js"
-import type { PieceDropHandlerArgs, SquareHandlerArgs, PieceHandlerArgs } from "react-chessboard/dist/types"
 import type { LastMove } from "@/types/chess"
 
 interface ChessBoardPanelProps {
@@ -34,7 +33,7 @@ export function ChessBoardPanel({
     setLegalTargets([])
   }, [])
 
-  const handleDrop = useCallback(({ sourceSquare, targetSquare }: PieceDropHandlerArgs) => {
+  const handleDrop = useCallback(({ sourceSquare, targetSquare }: any) => {
     if (!targetSquare) return false
     const success = onPieceDrop(sourceSquare as Square, targetSquare as Square)
     if (success) {
@@ -72,7 +71,7 @@ export function ChessBoardPanel({
     return true
   }, [getLegalMoves, clearHighlights])
 
-  const handleSquareClick = useCallback(({ square }: SquareHandlerArgs) => {
+  const handleSquareClick = useCallback(({ square }: any) => {
     const normalizedSquare = square as Square
 
     const targetInfo = legalTargets.find((target) => target.square === normalizedSquare)
@@ -93,7 +92,7 @@ export function ChessBoardPanel({
     showLegalTargets(normalizedSquare)
   }, [selectedSquare, legalTargets, onPieceDrop, clearHighlights, showLegalTargets])
 
-  const handlePieceDrag = useCallback(({ square }: PieceHandlerArgs) => {
+  const handlePieceDrag = useCallback(({ square }: any) => {
     if (!square) return
     showLegalTargets(square as Square)
   }, [showLegalTargets])

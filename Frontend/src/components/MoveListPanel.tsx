@@ -77,7 +77,7 @@ export function MoveListPanel({
                 const isWhiteActive = currentMoveIndex === whiteIndex
                 const isBlackActive = currentMoveIndex === blackIndex
                 const isWhitePlayed = currentMoveIndex >= whiteIndex
-                const isBlackPlayed = move.black && currentMoveIndex >= blackIndex
+                const isBlackPlayed = Boolean(move.black && currentMoveIndex >= blackIndex)
 
                 return (
                   <TableRow key={move.moveNumber}>
