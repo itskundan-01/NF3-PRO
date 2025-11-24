@@ -1,4 +1,5 @@
 import { useState } from "react"
+import { BrowserRouter, Routes, Route, Link } from "react-router-dom"
 import { Navbar } from "@/components/Navbar"
 import { ChessBoardPanel } from "@/components/ChessBoardPanel"
 import { MoveListPanel } from "@/components/MoveListPanel"
@@ -18,8 +19,9 @@ import { useAutoPlay } from "@/hooks/useAutoPlay"
 import { toast } from "sonner"
 import { Warning } from "@phosphor-icons/react"
 import type { Square } from "chess.js"
+import Home from "./pages/Home"
 
-function App() {
+function ChessAnalyzer() {
   const [uploadDialogOpen, setUploadDialogOpen] = useState(false)
   const [qualityWarning, setQualityWarning] = useState<string | null>(null)
   const [showWarningDialog, setShowWarningDialog] = useState(false)
@@ -142,6 +144,17 @@ function App() {
         </AlertDialogContent>
       </AlertDialog>
     </div>
+  )
+}
+
+function App() {
+  return (
+    <BrowserRouter>
+      <Routes>
+        <Route path="/" element={<Home />} />
+        <Route path="/analyzer" element={<ChessAnalyzer />} />
+      </Routes>
+    </BrowserRouter>
   )
 }
 
