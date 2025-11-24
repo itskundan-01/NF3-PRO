@@ -2,7 +2,7 @@ import { useState, useCallback, useEffect, useRef } from "react"
 import { Chess } from "chess.js"
 import type { Square, Move } from "chess.js"
 import { getMoveHistory, createNewGame } from "@/lib/chessUtils"
-import type { GameState, PlayedMove } from "@/types/chess"
+import type { GameState, PlayedMove, GameMetadata } from "@/types/chess"
 
 const FILES = ["a", "b", "c", "d", "e", "f", "g", "h"]
 
@@ -32,10 +32,19 @@ export function useChessGame() {
   const [mainLinePgn, setMainLinePgn] = useState<string>("")
   const [isInAnalysisMode, setIsInAnalysisMode] = useState(false)
   const historyRef = useRef<PlayedMove[]>([])
+  const metadataRef = useRef<GameMetadata | undefined>(undefined)
 
-  const updateGameState = useCallback((chess: Chess, moveIndex?: number, fullHistory?: PlayedMove[]) => {
+  const updateGameState = useCallback((chess: Chess, moveIndex?: number, fullHistory?: PlayedMove[], metadata?: GameMetadata) => {
     // Get full move history from either the passed fullHistory or stored historyRef
     const allMoves = fullHistory || historyRef.current
+    
+    // Update metadata ref if provided
+    if (metadata !== undefined) {
+      metadataRef.current = metadata
+    }
+    
+    // Use stored metadata from ref
+    const currentMetadata = metadataRef.current
     
     // Create a new Chess instance with full game to get complete move history
     const fullGame = new Chess()
@@ -62,6 +71,7 @@ export function useChessGame() {
       currentMoveIndex: moveIndex ?? allMoves.length - 1,
       checkSquare,
       lastMove,
+      metadata: currentMetadata,
     })
   }, [])
 
@@ -107,10 +117,11 @@ export function useChessGame() {
     setMainLinePgn("")
     setIsInAnalysisMode(false)
     historyRef.current = []
+    metadataRef.current = undefined
   }, [updateGameState])
 
   const loadPgn = useCallback(
-    (pgn: string) => {
+    (pgn: string, metadata?: GameMetadata) => {
       try {
         const newGame = new Chess()
         
@@ -141,7 +152,7 @@ export function useChessGame() {
         
         historyRef.current = recordedMoves
         setGame(newGame)
-        updateGameState(newGame, recordedMoves.length - 1, recordedMoves)
+        updateGameState(newGame, recordedMoves.length - 1, recordedMoves, metadata)
         setMainLinePgn(cleanPgn)
         setIsInAnalysisMode(false)
         return true

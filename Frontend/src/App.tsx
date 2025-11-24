@@ -19,6 +19,7 @@ import { useAutoPlay } from "@/hooks/useAutoPlay"
 import { toast } from "sonner"
 import { Warning } from "@phosphor-icons/react"
 import type { Square } from "chess.js"
+import type { GameMetadata } from "@/types/chess"
 import Home from "./pages/Home"
 
 function ChessAnalyzer() {
@@ -49,8 +50,8 @@ function ChessAnalyzer() {
     setUploadDialogOpen(true)
   }
 
-  const handleGameLoaded = (pgn: string, warning?: string) => {
-    const success = loadPgn(pgn)
+  const handleGameLoaded = (pgn: string, warning?: string, metadata?: GameMetadata) => {
+    const success = loadPgn(pgn, metadata)
     if (success) {
       toast.success("Game loaded successfully!")
       setUploadDialogOpen(false)
@@ -93,7 +94,10 @@ function ChessAnalyzer() {
               isAnalysisMode={isInAnalysisMode}
               checkSquare={gameState.checkSquare}
               lastMove={gameState.lastMove}
+              metadata={gameState.metadata}
+              currentMoveIndex={gameState.currentMoveIndex}
             />
+            
             <NavigationControls
               onFirst={goToFirst}
               onPrevious={goToPrevious}

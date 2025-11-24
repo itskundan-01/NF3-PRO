@@ -4,7 +4,7 @@ import { Card } from "@/components/ui/card"
 import { Chessboard } from "react-chessboard"
 import { Chess } from "chess.js"
 import type { Square, Move } from "chess.js"
-import type { LastMove } from "@/types/chess"
+import type { LastMove, GameMetadata } from "@/types/chess"
 
 interface ChessBoardPanelProps {
   position: string
@@ -12,6 +12,28 @@ interface ChessBoardPanelProps {
   isAnalysisMode?: boolean
   checkSquare?: string | null
   lastMove?: LastMove | null
+  metadata?: GameMetadata
+  currentMoveIndex: number
+}
+
+interface PlayerDisplayProps {
+  name: string
+  rating?: string
+  color: "white" | "black"
+  isActive: boolean
+}
+
+function PlayerDisplay({ name, rating, color, isActive }: PlayerDisplayProps) {
+  return (
+    <div className="flex items-center gap-2 px-3 py-2">
+      <p className="font-semibold text-sm truncate" title={name}>
+        {name}
+      </p>
+      {rating && (
+        <span className="text-xs text-muted-foreground">({rating})</span>
+      )}
+    </div>
+  )
 }
 
 export function ChessBoardPanel({
@@ -20,6 +42,8 @@ export function ChessBoardPanel({
   isAnalysisMode = false,
   checkSquare = null,
   lastMove = null,
+  metadata,
+  currentMoveIndex,
 }: ChessBoardPanelProps) {
   const borderClass = isAnalysisMode
     ? "border-accent border-2"
@@ -176,10 +200,39 @@ export function ChessBoardPanel({
     onPieceDrag: handlePieceDrag,
   }), [position, handleDrop, squareStyles, handleSquareClick, handlePieceDrag])
 
+  // Determine whose turn it is
+  const isWhiteTurn = position.includes(" w ")
+  
+  // Show player info if metadata exists
+  const showPlayerInfo = Boolean(metadata)
+
   return (
-    <Card className={`p-6 ${borderClass} transition-all duration-200`}>
-      <div className="w-full">
-        <Chessboard options={boardOptions} />
+    <Card className={`p-4 ${borderClass} transition-all duration-200`}>
+      <div className="w-full space-y-2">
+        {/* Black player info (top) */}
+        {showPlayerInfo && metadata && (
+          <PlayerDisplay
+            name={metadata.black.name}
+            rating={metadata.black.rating}
+            color="black"
+            isActive={!isWhiteTurn}
+          />
+        )}
+        
+        {/* Chessboard */}
+        <div className="w-full">
+          <Chessboard options={boardOptions} />
+        </div>
+        
+        {/* White player info (bottom) */}
+        {showPlayerInfo && metadata && (
+          <PlayerDisplay
+            name={metadata.white.name}
+            rating={metadata.white.rating}
+            color="white"
+            isActive={isWhiteTurn}
+          />
+        )}
       </div>
     </Card>
   )

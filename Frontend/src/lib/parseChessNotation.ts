@@ -1,6 +1,7 @@
 import Papa from "papaparse"
 import { createWorker, PSM } from "tesseract.js"
 import { Chess } from "chess.js"
+import type { GameMetadata } from "@/types/chess"
 
 export interface ParseResult {
   success: boolean
@@ -10,6 +11,7 @@ export interface ParseResult {
   isPartial?: boolean
   totalMovesInImage?: number
   imageQualityWarning?: string
+  metadata?: GameMetadata
 }
 
 function formatHistoryAsPgn(history: string[]): string {
@@ -47,6 +49,77 @@ function cleanPgnInput(input: string): string {
     .trim()
 }
 
+function extractPgnMetadata(pgnText: string): GameMetadata | undefined {
+  if (!pgnText) return undefined
+  
+  const metadata: GameMetadata = {
+    white: { name: "White" },
+    black: { name: "Black" }
+  }
+  
+  // Extract PGN headers [Tag "Value"]
+  const eventMatch = pgnText.match(/\[Event\s+"([^"]+)"\]/i)
+  const siteMatch = pgnText.match(/\[Site\s+"([^"]+)"\]/i)
+  const dateMatch = pgnText.match(/\[Date\s+"([^"]+)"\]/i)
+  const roundMatch = pgnText.match(/\[Round\s+"([^"]+)"\]/i)
+  const whiteMatch = pgnText.match(/\[White\s+"([^"]+)"\]/i)
+  const blackMatch = pgnText.match(/\[Black\s+"([^"]+)"\]/i)
+  const resultMatch = pgnText.match(/\[Result\s+"([^"]+)"\]/i)
+  const whiteEloMatch = pgnText.match(/\[WhiteElo\s+"([^"]+)"\]/i)
+  const blackEloMatch = pgnText.match(/\[BlackElo\s+"([^"]+)"\]/i)
+  const timeControlMatch = pgnText.match(/\[TimeControl\s+"([^"]+)"\]/i)
+  
+  if (eventMatch) metadata.event = eventMatch[1]
+  if (siteMatch) metadata.site = siteMatch[1]
+  if (dateMatch) metadata.date = dateMatch[1]
+  if (roundMatch) metadata.round = roundMatch[1]
+  if (resultMatch) metadata.result = resultMatch[1]
+  if (timeControlMatch) metadata.timeControl = timeControlMatch[1]
+  
+  if (whiteMatch && whiteMatch[1] !== "?" && whiteMatch[1] !== "??") {
+    metadata.white.name = whiteMatch[1]
+  }
+  if (blackMatch && blackMatch[1] !== "?" && blackMatch[1] !== "??") {
+    metadata.black.name = blackMatch[1]
+  }
+  if (whiteEloMatch && whiteEloMatch[1] !== "?" && whiteEloMatch[1] !== "??") {
+    metadata.white.rating = whiteEloMatch[1]
+  }
+  if (blackEloMatch && blackEloMatch[1] !== "?" && blackEloMatch[1] !== "??") {
+    metadata.black.rating = blackEloMatch[1]
+  }
+  
+  // Only return metadata if we found at least player names or event
+  if (whiteMatch || blackMatch || eventMatch) {
+    return metadata
+  }
+  
+  return undefined
+}
+
+/**
+ * Extract clock times from PGN annotations like { [%clk 0:03:00] }
+ * Returns array of time remaining in seconds for each half-move
+ */
+export function extractClockTimes(pgnText: string): number[] | undefined {
+  if (!pgnText) return undefined
+  
+  const clockTimes: number[] = []
+  // Match patterns like { [%clk 0:03:00] } or { [%clk 0:00:30] }
+  const clkPattern = /\{\s*\[%clk\s+(\d+):(\d+):(\d+)\]\s*\}/g
+  let match
+  
+  while ((match = clkPattern.exec(pgnText)) !== null) {
+    const hours = parseInt(match[1])
+    const minutes = parseInt(match[2])
+    const seconds = parseInt(match[3])
+    const totalSeconds = hours * 3600 + minutes * 60 + seconds
+    clockTimes.push(totalSeconds)
+  }
+  
+  return clockTimes.length > 0 ? clockTimes : undefined
+}
+
 export async function parsePgnTextInput(rawInput: string): Promise<ParseResult> {
   const cleanedInput = cleanPgnInput(rawInput)
 
@@ -58,6 +131,14 @@ export async function parsePgnTextInput(rawInput: string): Promise<ParseResult> 
   }
 
   const normalizedInput = normalizeCastling(cleanedInput)
+  const metadata = extractPgnMetadata(normalizedInput)
+  const clockTimes = extractClockTimes(normalizedInput)
+  
+  // Add clock times to metadata if found
+  if (metadata && clockTimes) {
+    metadata.clockTimes = clockTimes
+  }
+  
   const candidates = [normalizedInput]
   const stripped = stripPgnMetadata(normalizedInput)
   if (stripped && stripped !== normalizedInput) {
@@ -75,6 +156,7 @@ export async function parsePgnTextInput(rawInput: string): Promise<ParseResult> 
           success: true,
           pgn: formatHistoryAsPgn(history),
           movesFound: Math.ceil(history.length / 2),
+          metadata,
         }
       }
     } catch {
@@ -89,6 +171,7 @@ export async function parsePgnTextInput(rawInput: string): Promise<ParseResult> 
       success: true,
       pgn: stripped || normalizedInput,
       movesFound: validationResult.moveCount,
+      metadata,
     }
   }
 
@@ -98,6 +181,7 @@ export async function parsePgnTextInput(rawInput: string): Promise<ParseResult> 
       pgn: validationResult.partialPgn,
       movesFound: validationResult.moveCount,
       isPartial: true,
+      metadata,
     }
   }
 
@@ -215,9 +299,10 @@ async function parseImageWithGemini(file: File): Promise<ParseResult> {
     }
     const API_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${API_KEY}`
     
-    const promptText = `You are an expert chess analyst and handwriting recognition specialist. Your task is to carefully extract chess moves from this handwritten scoresheet image.
+    const promptText = `You are an expert chess analyst and handwriting recognition specialist. Your task is to carefully extract chess moves AND player information from this handwritten scoresheet image.
 
 📋 SCORESHEET STRUCTURE:
+- Player names are usually at the TOP or in header section (White player on left, Black player on right)
 - Two columns: WHITE moves (LEFT) and BLACK moves (RIGHT)
 - Each row = one complete move pair (White's move + Black's move)
 - Move numbers are in the leftmost column
@@ -225,6 +310,15 @@ async function parseImageWithGemini(file: File): Promise<ParseResult> {
 - CRITICALLY IMPORTANT: Extract ALL visible moves from the image, even if handwriting is unclear
 
 🔍 STEP-BY-STEP EXTRACTION PROCESS:
+
+STEP 0 - EXTRACT PLAYER INFORMATION:
+Look for player names at the top of the scoresheet:
+- White player name (usually on LEFT side or labeled "White:")
+- Black player name (usually on RIGHT side or labeled "Black:")
+- Player ratings if visible (Elo/FIDE ratings)
+- Event/tournament name if visible
+- Date if visible
+- Round number if visible
 
 STEP 1 - READ EACH MOVE CAREFULLY:
 For each row, identify:
@@ -279,26 +373,41 @@ After extracting all moves, review the complete game:
 📤 OUTPUT FORMAT:
 Return a JSON object with this structure:
 {
+  "whiteName": "Magnus Carlsen",
+  "blackName": "Fabiano Caruana",
+  "whiteRating": "2882",
+  "blackRating": "2835",
+  "event": "World Championship 2018",
+  "site": "London",
+  "date": "2018.11.09",
+  "round": "1",
   "moves": "1. e4 e5 2. Nf3 Nc6 3. Bb5 a6 4. Ba4 Nf6 5. O-O Be7",
   "totalMoves": 7,
   "confidence": "high"
 }
 
 Rules for output:
+- whiteName/blackName: Extract from top of scoresheet. If not found, use "White" and "Black"
+- whiteRating/blackRating: Extract if visible (ratings like "2500", "1800", etc.). Omit if not found
+- event: Tournament/event name if visible. Omit if not found
+- site: Location if visible. Omit if not found
+- date: Date in format YYYY.MM.DD if visible. Omit if not found
+- round: Round number if visible. Omit if not found
 - moves: PGN notation with move numbers, dots, and moves separated by spaces
 - totalMoves: Total number of move pairs you can see in the scoresheet (count all rows with moves)
 - confidence: "high" if all moves are clear, "medium" if some are unclear, "low" if handwriting is very difficult
-- If no chess notation found, return: {"moves": "NO_NOTATION_FOUND", "totalMoves": 0, "confidence": "low"}
+- If no chess notation found, return: {"whiteName": "White", "blackName": "Black", "moves": "NO_NOTATION_FOUND", "totalMoves": 0, "confidence": "low"}
 
 🎯 QUALITY CHECK:
 Before returning your answer:
+✓ Did you check for player names at the top?
 ✓ Did you check each ambiguous letter carefully?
 ✓ Did you mentally validate that all moves are legal?
 ✓ Did you convert all castling to O-O format (letter O)?
 ✓ Are move numbers sequential?
 ✓ Did you include ALL moves from the scoresheet?
 
-Now carefully extract the moves from this scoresheet image:`
+Now carefully extract the player information and moves from this scoresheet image:`
 
     const requestBody = {
       contents: [{
@@ -333,6 +442,7 @@ Now carefully extract the moves from this scoresheet image:`
     let extractedMoves = ""
     let totalMovesInImage = 0
     let confidence = "unknown"
+    let metadata: GameMetadata | undefined = undefined
     
     try {
       // Remove markdown code blocks if present
@@ -342,6 +452,28 @@ Now carefully extract the moves from this scoresheet image:`
         extractedMoves = parsed.moves || ""
         totalMovesInImage = parsed.totalMoves || 0
         confidence = parsed.confidence || "unknown"
+        
+        // Extract player metadata from Gemini response
+        const whiteName = parsed.whiteName || "White"
+        const blackName = parsed.blackName || "Black"
+        
+        // Only create metadata if we have meaningful player names (not just defaults)
+        if (whiteName !== "White" || blackName !== "Black" || parsed.event || parsed.whiteRating || parsed.blackRating) {
+          metadata = {
+            white: {
+              name: whiteName,
+              rating: parsed.whiteRating || undefined
+            },
+            black: {
+              name: blackName,
+              rating: parsed.blackRating || undefined
+            },
+            event: parsed.event || undefined,
+            site: parsed.site || undefined,
+            date: parsed.date || undefined,
+            round: parsed.round || undefined,
+          }
+        }
       } else {
         // Fallback to treating response as plain PGN
         extractedMoves = geminiResponse
@@ -397,6 +529,7 @@ Now carefully extract the moves from this scoresheet image:`
           isPartial: true,
           totalMovesInImage: totalMovesInImage > 0 ? totalMovesInImage : undefined,
           imageQualityWarning: warningMessage,
+          metadata,
         }
       }
       
@@ -421,6 +554,7 @@ Now carefully extract the moves from this scoresheet image:`
       isPartial: moveCount < totalMovesInImage,
       totalMovesInImage: totalMovesInImage > 0 ? totalMovesInImage : undefined,
       imageQualityWarning: warningMessage,
+      metadata,
     }
   } catch (error) {
     console.error("Gemini API error:", error)

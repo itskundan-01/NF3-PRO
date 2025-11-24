@@ -19,11 +19,12 @@ import {
   parsePgnTextInput,
   type ParseResult,
 } from "@/lib/parseChessNotation"
+import type { GameMetadata } from "@/types/chess"
 
 interface UploadDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
-  onGameLoaded: (pgn: string, warning?: string) => void
+  onGameLoaded: (pgn: string, warning?: string, metadata?: GameMetadata) => void
 }
 
 type LoadingStage = "uploading" | "extracting" | "validating" | "complete"
@@ -105,7 +106,7 @@ export function UploadDialog({
       setResult(parseResult)
 
       if (parseResult.success && parseResult.pgn) {
-        onGameLoaded(parseResult.pgn, parseResult.imageQualityWarning)
+        onGameLoaded(parseResult.pgn, parseResult.imageQualityWarning, parseResult.metadata)
       } else if (parseResult.error) {
         // Show error toast if parsing failed
         alert(parseResult.error)
@@ -142,7 +143,7 @@ export function UploadDialog({
         setResult(parseResult)
 
         if (parseResult.success && parseResult.pgn) {
-          onGameLoaded(parseResult.pgn, parseResult.imageQualityWarning)
+          onGameLoaded(parseResult.pgn, parseResult.imageQualityWarning, parseResult.metadata)
         } else if (parseResult.error) {
           alert(parseResult.error)
         }
