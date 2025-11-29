@@ -21,6 +21,10 @@ import { Warning } from "@phosphor-icons/react"
 import type { Square } from "chess.js"
 import type { GameMetadata } from "@/types/chess"
 import Home from "./pages/Home"
+import Tournaments from "./pages/Tournaments"
+import TournamentDetail from "./pages/TournamentDetail"
+import PlayerProfile from "./pages/PlayerProfile"
+import GameViewer from "./pages/GameViewer"
 
 function ChessAnalyzer() {
   const [uploadDialogOpen, setUploadDialogOpen] = useState(false)
@@ -151,12 +155,52 @@ function ChessAnalyzer() {
   )
 }
 
+function TournamentsWrapper() {
+  return (
+    <div className="min-h-screen bg-background">
+      <Navbar />
+      <Tournaments />
+    </div>
+  )
+}
+
+function TournamentDetailWrapper() {
+  return (
+    <div className="min-h-screen bg-background">
+      <Navbar />
+      <TournamentDetail />
+    </div>
+  )
+}
+
+function PlayerProfileWrapper() {
+  return (
+    <div className="min-h-screen bg-background">
+      <Navbar />
+      <PlayerProfile />
+    </div>
+  )
+}
+
+function HomeWrapper() {
+  return (
+    <div className="min-h-screen bg-background">
+      <Navbar />
+      <Home />
+    </div>
+  )
+}
+
 function App() {
   return (
     <BrowserRouter>
       <Routes>
-        <Route path="/" element={<Home />} />
+        <Route path="/" element={<HomeWrapper />} />
         <Route path="/analyzer" element={<ChessAnalyzer />} />
+        <Route path="/tournaments" element={<TournamentsWrapper />} />
+        <Route path="/tournament/:id" element={<TournamentDetailWrapper />} />
+        <Route path="/tournament/:tournamentId/game/:gameId" element={<GameViewer />} />
+        <Route path="/player/:id" element={<PlayerProfileWrapper />} />
       </Routes>
     </BrowserRouter>
   )

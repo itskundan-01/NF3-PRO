@@ -84,7 +84,7 @@ const Home = () => {
       {/* Featured Tournaments */}
       <section className="py-12 sm:py-16 px-4">
         <div className="max-w-6xl mx-auto">
-          <h2 className="text-2xl sm:text-3xl font-bold mb-6 sm:mb-8">Featured Tournaments</h2>
+          <h2 className="text-2xl sm:text-3xl font-bold mb-6 sm:mb-8 text-foreground">Featured Tournaments</h2>
           <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
             {featuredTournaments.map((tournament) => (
               <a key={tournament.id} href={`/tournament/${tournament.id}`}>
@@ -93,7 +93,7 @@ const Home = () => {
                     <Trophy className="h-6 sm:h-8 w-6 sm:w-8 text-accent flex-shrink-0" />
                     <span className="text-xs sm:text-sm text-muted-foreground text-right ml-2">{tournament.date}</span>
                   </div>
-                  <h3 className="text-lg sm:text-xl font-semibold mb-2">{tournament.name}</h3>
+                  <h3 className="text-lg sm:text-xl font-semibold mb-2 text-foreground">{tournament.name}</h3>
                   <p className="text-sm sm:text-base text-muted-foreground mb-3 sm:mb-4">{tournament.location}</p>
                   <div className="flex items-center gap-2 sm:gap-4 text-xs sm:text-sm text-muted-foreground">
                     <div className="flex items-center gap-1">
