@@ -37,6 +37,27 @@ function formatHistoryAsPgn(history: string[]): string {
   return segments.join(" ").trim()
 }
 
+function trimPgnToMoveCount(pgn: string, targetMoves: number): string | null {
+  if (targetMoves <= 0) {
+    return null
+  }
+
+  try {
+    const chess = new Chess()
+    chess.loadPgn(pgn)
+    const history = chess.history()
+    if (!history.length) {
+      return null
+    }
+
+    const halfMovesToKeep = Math.min(history.length, targetMoves * 2)
+    const trimmedHistory = history.slice(0, halfMovesToKeep)
+    return formatHistoryAsPgn(trimmedHistory)
+  } catch {
+    return null
+  }
+}
+
 function cleanPgnInput(input: string): string {
   if (!input) return ""
 
@@ -130,7 +151,7 @@ export async function parsePgnTextInput(rawInput: string): Promise<ParseResult> 
     }
   }
 
-  const normalizedInput = normalizeCastling(cleanedInput)
+  const normalizedInput = normalizeNotation(cleanedInput)
   const metadata = extractPgnMetadata(normalizedInput)
   const clockTimes = extractClockTimes(normalizedInput)
   
@@ -302,12 +323,35 @@ async function parseImageWithGemini(file: File): Promise<ParseResult> {
     const promptText = `You are an expert chess analyst and handwriting recognition specialist. Your task is to carefully extract chess moves AND player information from this handwritten scoresheet image.
 
 📋 SCORESHEET STRUCTURE:
-- Player names are usually at the TOP or in header section (White player on left, Black player on right)
-- Two columns: WHITE moves (LEFT) and BLACK moves (RIGHT)
-- Each row = one complete move pair (White's move + Black's move)
-- Move numbers are in the leftmost column
-- Read row by row: move number → White's move → Black's move
-- CRITICALLY IMPORTANT: Extract ALL visible moves from the image, even if handwriting is unclear
+- The image is a chess scoresheet, likely containing handwritten moves.
+- It often has MULTIPLE COLUMNS of moves (e.g., moves 1-30 on the left, 31-60 on the right).
+- Each section typically has columns: "White", "Black" (and sometimes "No." or "S.No").
+- Player names are usually at the top.
+- CRITICALLY IMPORTANT: Extract ALL visible moves from the image, even if handwriting is unclear or misaligned.
+
+🔍 CRITICAL INSTRUCTIONS FOR HANDWRITING & ALIGNMENT:
+1. **Misalignment**: The handwritten text may not be perfectly aligned with the printed lines. Trust the sequence of moves over strict vertical alignment. If a move drifts into the next column, infer it based on the move number sequence.
+2. **Unclear Handwriting**:
+   - Use CHESS CONTEXT. If a move looks like "Qd5" but the Queen cannot move there, look for similar legal moves (e.g., "Qd4", "Bd5", "Nd5").
+   - Common confusions:
+     - 'b' vs '6' vs 'h'
+     - 'g' vs '9' vs 'a' vs 'q'
+     - 'O-O' (castling) vs '0-0'
+     - 'N' (Knight) vs 'K' (King) vs 'H'
+     - '1' vs '7' vs '/'
+     - 'x' (capture) might be faint or look like a scribble.
+     - 'e' vs 'c'
+     - 'd' vs 'cl'
+3. **Messy/Crossed-out**: Ignore crossed-out text. Look for the final intended move.
+4. **Incomplete/Cut-off**: If the image cuts off, extract as much as you can see clearly.
+
+🧠 CHESS LOGIC VALIDATION (Step-by-Step):
+- As you extract, mentally play the game from the starting position.
+- If you see a move that is ILLEGAL, stop and re-evaluate the handwriting.
+- Ask: "What legal move looks most like this scribble?"
+- Example: If you see "R1", it might be "Re1" or "Ra1". If you see "00", it is "O-O".
+- Ensure moves alternate White-Black correctly.
+- Verify move numbers are sequential.
 
 🔍 STEP-BY-STEP EXTRACTION PROCESS:
 
@@ -325,19 +369,10 @@ For each row, identify:
 - Move number (1, 2, 3, etc.)
 - White's move in LEFT column
 - Black's move in RIGHT column
+- **HANDLE MULTIPLE COLUMNS**: If the scoresheet has a second set of columns (e.g. 31-60), continue reading there after the first set.
 
 STEP 2 - INTERPRET HANDWRITING:
-Common OCR/handwriting confusions - BE VERY CAREFUL:
-- Letter "g" vs "a" or "q" (e.g., Ng5 vs Na5)
-- Letter "O" vs number "0" (castling must use letter O: O-O)
-- "N" vs "K" (N=knight, K=king)
-- "b" vs "h" or "6"
-- "c" vs "e"
-- "d" vs "cl" or "a"
-- "1" vs "l" (lowercase L)
-- "5" vs "S"
-- Faint "x" for captures
-- Unclear "+" or "#" for check/checkmate
+(See Critical Instructions above)
 
 STEP 3 - VALIDATE EACH MOVE:
 As you extract moves, mentally play them on the board:
@@ -497,7 +532,7 @@ Now carefully extract the player information and moves from this scoresheet imag
       .replace(/##\s*/g, '')
       .trim()
     
-    extractedMoves = normalizeCastling(extractedMoves)
+    extractedMoves = normalizeNotation(extractedMoves)
 
     // If Gemini returned properly formatted PGN (starts with "1."), use it directly
     let cleanedText = extractedMoves
@@ -522,10 +557,21 @@ Now carefully extract the player information and moves from this scoresheet imag
           ? `Only ${validationResult.moveCount} of ${totalMovesInImage} moves could be extracted from the image. Some moves may be unclear due to handwriting. Consider re-uploading a clearer image for complete game analysis.`
           : undefined
         
+        let partialPgn = validationResult.partialPgn
+        let partialMoveCount = validationResult.moveCount
+
+        if (totalMovesInImage > 0 && partialMoveCount > totalMovesInImage) {
+          const trimmed = trimPgnToMoveCount(partialPgn, totalMovesInImage)
+          if (trimmed) {
+            partialPgn = trimmed
+            partialMoveCount = totalMovesInImage
+          }
+        }
+        
         return {
           success: true,
-          pgn: validationResult.partialPgn,
-          movesFound: validationResult.moveCount,
+          pgn: partialPgn,
+          movesFound: partialMoveCount,
           isPartial: true,
           totalMovesInImage: totalMovesInImage > 0 ? totalMovesInImage : undefined,
           imageQualityWarning: warningMessage,
@@ -539,7 +585,15 @@ Now carefully extract the player information and moves from this scoresheet imag
       }
     }
 
-    const moveCount = (cleanedText.match(/\d+\./g) || []).length
+    let moveCount = (cleanedText.match(/\d+\./g) || []).length
+
+    if (totalMovesInImage > 0 && moveCount > totalMovesInImage) {
+      const trimmed = trimPgnToMoveCount(cleanedText, totalMovesInImage)
+      if (trimmed) {
+        cleanedText = trimmed
+        moveCount = totalMovesInImage
+      }
+    }
     
     // Only show warning if we have total count AND didn't extract all moves
     let warningMessage: string | undefined = undefined
@@ -598,7 +652,7 @@ function stripPgnMetadata(text: string): string {
   return sanitized.replace(/\s+/g, " ").trim()
 }
 
-function normalizeCastling(text: string): string {
+function normalizeNotation(text: string): string {
   let normalized = text
     // Handle zeros (0) -> letter O
     .replace(/0\s*-\s*0\s*-\s*0/g, 'O-O-O')
@@ -617,11 +671,37 @@ function normalizeCastling(text: string): string {
     .replace(/\b0-0\b/g, 'O-O')          // Handles 0-0
     .replace(/\b0-0-0\b/g, 'O-O-O')      // Handles 0-0-0
   
+  // Handle non-standard piece notation (Kn -> N, Ki -> K, Kt -> N)
+  normalized = normalized
+    .replace(/\bKn(?=[a-h1-8x-])/gi, 'N')
+    .replace(/\bKt(?=[a-h1-8x-])/gi, 'N')
+    .replace(/\bKi(?=[a-h1-8x-])/gi, 'K')
+
+  // Handle captures with colons
+  normalized = normalized.replace(/:/g, 'x')
+
+  // Remove hyphens between piece and square (e.g. N-f3 -> Nf3)
+  // But preserve O-O and O-O-O
+  const castlingPlaceholder2 = 'CASTLE_SHORT_PLACEHOLDER'
+  const castlingPlaceholder3 = 'CASTLE_LONG_PLACEHOLDER'
+  
+  normalized = normalized
+    .replace(/O-O-O/g, castlingPlaceholder3)
+    .replace(/O-O/g, castlingPlaceholder2)
+  
+  // Remove hyphens
+  normalized = normalized.replace(/-/g, '')
+  
+  // Restore castling
+  normalized = normalized
+    .replace(new RegExp(castlingPlaceholder3, 'g'), 'O-O-O')
+    .replace(new RegExp(castlingPlaceholder2, 'g'), 'O-O')
+
   return normalized
 }
 
 function extractChessMoves(text: string): string {
-  let normalizedText = normalizeCastling(text)
+  let normalizedText = normalizeNotation(text)
     .replace(/\s+/g, ' ')
     .trim()
   
@@ -691,7 +771,7 @@ function isValidMove(move: string): boolean {
   if (!move || move.length < 2) return false
   
   const cleanedMove = move.replace(/[+#?!]/g, '').trim()
-  const normalizedMove = normalizeCastling(cleanedMove)
+  const normalizedMove = normalizeNotation(cleanedMove)
   
   if (/^(O-O-O|O-O)$/i.test(normalizedMove)) {
     return true
@@ -708,7 +788,7 @@ function isValidMove(move: string): boolean {
 function cleanMove(move: string): string {
   let cleaned = move.trim()
   
-  cleaned = normalizeCastling(cleaned)
+  cleaned = normalizeNotation(cleaned)
   
   if (/^(O-O-O|O-O)$/i.test(cleaned)) {
     return cleaned.toUpperCase()
@@ -727,7 +807,126 @@ function validatePgn(pgn: string): boolean {
   }
 }
 
+function getLevenshteinDistance(a: string, b: string): number {
+  if (a.length === 0) return b.length
+  if (b.length === 0) return a.length
+
+  const matrix: number[][] = []
+
+  for (let i = 0; i <= b.length; i++) {
+    matrix[i] = [i]
+  }
+
+  for (let j = 0; j <= a.length; j++) {
+    matrix[0][j] = j
+  }
+
+  for (let i = 1; i <= b.length; i++) {
+    for (let j = 1; j <= a.length; j++) {
+      if (b.charAt(i - 1) == a.charAt(j - 1)) {
+        matrix[i][j] = matrix[i - 1][j - 1]
+      } else {
+        matrix[i][j] = Math.min(
+          matrix[i - 1][j - 1] + 1,
+          Math.min(
+            matrix[i][j - 1] + 1,
+            matrix[i - 1][j] + 1
+          )
+        )
+      }
+    }
+  }
+
+  return matrix[b.length][a.length]
+}
+
+function findClosestLegalMove(move: string, chess: Chess): string | null {
+  const legalMoves = chess.moves()
+  let bestMatch: string | null = null
+  let minDistance = Infinity
+
+  // Normalize the input move for comparison
+  const normalizedInput = move.replace(/[+#x]/g, '').replace(/0/g, 'O')
+
+  for (const legalMove of legalMoves) {
+    const normalizedLegal = legalMove.replace(/[+#x]/g, '')
+    
+    // 1. Exact match (ignoring check/capture symbols)
+    if (normalizedInput === normalizedLegal) return legalMove
+
+    // 2. Levenshtein distance
+    const distance = getLevenshteinDistance(normalizedInput, normalizedLegal)
+    
+    // Threshold: allow 1 or 2 edits depending on length
+    // Increased threshold for better recovery of messy handwriting
+    const threshold = normalizedInput.length > 3 ? 3 : 2
+    
+    if (distance <= threshold && distance < minDistance) {
+      minDistance = distance
+      bestMatch = legalMove
+    }
+  }
+  
+  return bestMatch
+}
+
+function matchSkeletonMove(input: string, chess: Chess): string | null {
+  const legalMoves = chess.moves()
+  const normalizedInput = input.replace(/[+#x]/g, '')
+  
+  // Strategy 1: Missing file (e.g. "B6" -> "Bf6")
+  // Regex: Piece + Rank
+  if (/^[RNBQK][1-8]$/.test(normalizedInput)) {
+    const piece = normalizedInput[0]
+    const rank = normalizedInput[1]
+    // Find moves that start with this piece and end with this rank
+    // e.g. Bf6 matches B...6
+    const candidates = legalMoves.filter(m => {
+      const cleanM = m.replace(/[+#x]/g, '')
+      return cleanM.startsWith(piece) && cleanM.endsWith(rank) && cleanM.length === 3
+    })
+    if (candidates.length === 1) return candidates[0]
+  }
+  
+  // Strategy 2: Missing rank (e.g. "Bf" -> "Bf6")
+  if (/^[RNBQK][a-h]$/.test(normalizedInput)) {
+    const piece = normalizedInput[0]
+    const file = normalizedInput[1]
+    const candidates = legalMoves.filter(m => {
+      const cleanM = m.replace(/[+#x]/g, '')
+      return cleanM.startsWith(piece + file) && cleanM.length === 3
+    })
+    if (candidates.length === 1) return candidates[0]
+  }
+  
+  // Strategy 3: Missing piece (e.g. "f6" -> "Bf6" or "Nf6")
+  // Only if "f6" (pawn move) is NOT legal (which is why we are here)
+  if (/^[a-h][1-8]$/.test(normalizedInput)) {
+    const square = normalizedInput
+    const candidates = legalMoves.filter(m => {
+      const cleanM = m.replace(/[+#x]/g, '')
+      return cleanM.endsWith(square) && /^[RNBQK]/.test(cleanM) && cleanM.length === 3
+    })
+    if (candidates.length === 1) return candidates[0]
+  }
+
+  return null
+}
+
 function tryOcrCorrections(move: string, chess: Chess): string | null {
+  // 0. Try skeleton matching (missing characters)
+  const skeletonMatch = matchSkeletonMove(move, chess)
+  if (skeletonMatch) {
+    return skeletonMatch
+  }
+
+  // 1. Try fuzzy matching against all legal moves
+  const fuzzyMatch = findClosestLegalMove(move, chess)
+  if (fuzzyMatch) {
+    return fuzzyMatch
+  }
+
+  // Then try specific disambiguation patterns
   // First, try disambiguation for ambiguous piece moves (Rd1 → Rcd1, Rfd1, etc.)
   if (/^[RNBQK][a-h]?[1-8]$/.test(move)) {
     const piece = move[0]
@@ -823,7 +1022,7 @@ function tryOcrCorrections(move: string, chess: Chess): string | null {
 }
 
 function validatePgnWithDetails(pgn: string): { valid: boolean; failedAt?: string; partialPgn?: string; moveCount: number } {
-  const normalized = normalizeCastling(pgn)
+  const normalized = normalizeNotation(pgn)
   const cleanedPgn = stripPgnMetadata(normalized)
 
   try {
@@ -854,7 +1053,7 @@ function validatePgnWithDetails(pgn: string): { valid: boolean; failedAt?: strin
       if (!cleanToken) continue
       
       // Apply castling normalization to each individual token
-      cleanToken = normalizeCastling(cleanToken)
+      cleanToken = normalizeNotation(cleanToken)
       
       try {
         let attemptedMove = testGame.move(cleanToken)
