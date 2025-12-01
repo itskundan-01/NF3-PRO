@@ -37,15 +37,15 @@ const Home = () => {
   return (
     <div className="min-h-screen bg-background">
       {/* Hero Section */}
-      <section className="relative py-12 sm:py-20 px-4 bg-gradient-to-b from-primary to-primary/90">
+      <section className="relative py-12 sm:py-20 px-4 bg-gradient-to-b from-[oklch(0.25_0.01_270)] to-[oklch(0.25_0.01_270)]/90">
         <div className="max-w-6xl mx-auto text-center">
           <div className="flex flex-col items-center justify-center gap-4 sm:gap-6 mb-4 sm:mb-6">
             <img src="/nf3-pro.png" alt="NF3 Pro Logo" className="h-20 sm:h-32 w-20 sm:w-32 object-contain" />
-            <h1 className="text-2xl sm:text-4xl lg:text-5xl font-bold text-primary-foreground leading-tight">
+            <h1 className="text-2xl sm:text-4xl lg:text-5xl font-bold text-white leading-tight">
               Global Chess Tournament Archive
             </h1>
           </div>
-          <p className="text-sm sm:text-lg lg:text-xl text-primary-foreground/90 mb-8 sm:mb-12 max-w-2xl mx-auto px-2">
+          <p className="text-sm sm:text-lg lg:text-xl text-white/90 mb-8 sm:mb-12 max-w-2xl mx-auto px-2">
             Digitize tournament scoresheets, explore games, and preserve chess history
           </p>
           
@@ -66,13 +66,13 @@ const Home = () => {
           {/* Quick Actions */}
           <div className="flex flex-col sm:flex-row flex-wrap gap-3 sm:gap-4 justify-center mt-6 sm:mt-8 px-2">
             <a href="/tournaments" className="w-full sm:w-auto">
-              <Button size="sm" variant="secondary" className="w-full sm:w-auto text-sm sm:text-base">
+              <Button size="sm" variant="secondary" className="w-full sm:w-auto text-sm sm:text-base bg-white text-black hover:bg-gray-200 border-none">
                 <Trophy className="mr-2 h-4 w-4" />
                 Browse Tournaments
               </Button>
             </a>
             <a href="/analyzer" className="w-full sm:w-auto">
-              <Button size="sm" variant="secondary" className="w-full sm:w-auto text-sm sm:text-base">
+              <Button size="sm" variant="secondary" className="w-full sm:w-auto text-sm sm:text-base bg-white text-black hover:bg-gray-200 border-none">
                 <Upload className="mr-2 h-4 w-4" />
                 Upload Scoresheet
               </Button>
